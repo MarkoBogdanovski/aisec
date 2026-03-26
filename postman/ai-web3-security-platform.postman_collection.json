@@ -1,0 +1,165 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-aiweb3sec001",
+    "name": "AI Web3 Security Platform API",
+    "description": "NestJS gateway routes (global prefix /api/v1). Root / and /health are excluded from the prefix.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "chainId", "value": "1" },
+    { "key": "contractAddress", "value": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
+    { "key": "jobId", "value": "replace-after-analyze-response" },
+    { "key": "incidentId", "value": "replace-with-real-id" },
+    { "key": "tokenAddress", "value": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" }
+  ],
+  "item": [
+    {
+      "name": "App (no /api/v1 prefix)",
+      "item": [
+        {
+          "name": "GET /",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/"
+          }
+        },
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Docs",
+      "item": [
+        {
+          "name": "GET Swagger UI",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/api/docs"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Analysis",
+      "item": [
+        {
+          "name": "POST /api/v1/analyze/contract (async)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chain_id\": \"{{chainId}}\",\n  \"contract_address\": \"{{contractAddress}}\",\n  \"priority\": \"normal\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/analyze/contract",
+            "description": "Returns 202 with job_id. Poll GET /api/v1/jobs/:jobId and then GET /api/v1/contracts/:chainId/:address."
+          }
+        },
+        {
+          "name": "POST /api/v1/analyze/wallet (stub 501)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chain_id\": \"{{chainId}}\",\n  \"wallet_address\": \"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b\",\n  \"priority\": \"normal\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/analyze/wallet"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Contracts",
+      "item": [
+        {
+          "name": "GET /api/v1/contracts/:chainId/:address",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/contracts/{{chainId}}/{{contractAddress}}"
+          }
+        },
+        {
+          "name": "GET /api/v1/contracts/:chainId/:address/history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/contracts/{{chainId}}/{{contractAddress}}/history"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Jobs",
+      "item": [
+        {
+          "name": "GET /api/v1/jobs/:jobId",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/jobs/{{jobId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Incidents",
+      "item": [
+        {
+          "name": "GET /api/v1/incidents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/incidents",
+            "description": "Optional query: ?severity=HIGH&status=OPEN (Prisma enums: LOW|MEDIUM|HIGH|CRITICAL, OPEN|INVESTIGATING|...)"
+          }
+        },
+        {
+          "name": "GET /api/v1/incidents/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/incidents/{{incidentId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Market",
+      "item": [
+        {
+          "name": "GET /api/v1/market/events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/market/events?limit=20"
+          }
+        },
+        {
+          "name": "GET /api/v1/market/token/:address",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/market/token/{{tokenAddress}}"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+const app_vue_vue_type_style_index_0_lang = 'html{background-color:#0a0a10;scrollbar-color:rgba(16,185,129,.72) hsla(0,0%,100%,.06);scrollbar-width:thin}body{background:#0a0a10;font-family:Inter,Segoe UI,sans-serif}::-webkit-scrollbar{height:11px;width:11px}::-webkit-scrollbar-track{background:#ffffff0d;border-radius:999px}::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#10b981e0,#22c55eb8);border:2px solid rgba(10,10,16,.72);border-radius:999px}::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,#34d399f0,#4ade80d1)}.nav-link{color:#d4d4d8;position:relative;text-decoration:none;transition:color .2s ease}.nav-link:after{background:linear-gradient(90deg,#10b9811a,#6ee7b7f2,#10b9811a);bottom:-.45rem;content:"";height:1px;left:0;position:absolute;transform:scaleX(0);transform-origin:left;transition:transform .2s ease;width:100%}.nav-link.router-link-active,.nav-link:hover{color:#fff}.nav-link.router-link-active:after,.nav-link:hover:after{transform:scaleX(1)}';
+export {
+  app_vue_vue_type_style_index_0_lang as default
+};
+//# sourceMappingURL=entry-styles-3.mjs-figyjqfj.js.map

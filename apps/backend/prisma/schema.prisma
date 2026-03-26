@@ -1,0 +1,408 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Enums
+enum FindingType {
+  VULNERABILITY
+  SUSPICIOUS_PATTERN
+  COMPLIANCE_ISSUE
+  CODE_SMELL
+  SECURITY_BEST_PRACTICE
+  FINANCIAL_RISK
+  LIQUIDITY_RISK
+  GOVERNANCE_RISK
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RiskLevel {
+  MINIMAL
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum Network {
+  ETHEREUM
+  POLYGON
+  BSC
+  ARBITRUM
+  OPTIMISM
+  AVALANCHE
+  FANTOM
+  BASE
+}
+
+enum ContractType {
+  ERC20
+  ERC721
+  ERC1155
+  GOVERNANCE
+  STAKING
+  DEFI_PROTOCOL
+  BRIDGE
+  MULTISIG
+  CUSTOM
+}
+
+enum IncidentStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  CLOSED
+  FALSE_POSITIVE
+}
+
+enum IncidentType {
+  HACK
+  RUG_PULL
+  FLASH_LOAN_ATTACK
+  EXPLOIT
+  PHISHING
+  FRONT_RUNNING
+  LIQUIDITY_CRISIS
+  GOVERNANCE_ATTACK
+}
+
+// Main Entities
+model Contract {
+  id              String       @id @default(cuid())
+  /// EVM chain id as decimal string (e.g. "1" = Ethereum mainnet)
+  chainId         String       @default("1")
+  address         String
+  bytecodeHash    String?
+  abi             Json?
+  isProxy         Boolean      @default(false)
+  proxyImpl       String?
+  name            String?
+  symbol          String?
+  network         Network
+  contractType    ContractType
+  deployerAddress String?
+  deploymentBlock BigInt?
+  deploymentTx    String?
+  isVerified      Boolean      @default(false)
+  isActive        Boolean      @default(true)
+  totalSupply     String? // For tokens
+  decimals        Int? // For tokens
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Relations
+  findings   ContractFinding[]
+  incidents  IncidentEntity[]
+  tokenMetrics TokenMetrics[]
+  riskScores ContractRiskScore[]
+
+  @@unique([chainId, address])
+  @@index([address])
+  @@index([chainId])
+  @@index([network])
+  @@index([contractType])
+  @@index([deployerAddress])
+  @@index([isActive])
+  @@index([bytecodeHash])
+  @@map("contracts")
+}
+
+/// Spec §4.2.2 — aggregated analysis run with JSON findings
+model ContractRiskScore {
+  id              String    @id @default(uuid())
+  contractId      String
+  contract        Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  score           Int
+  /// low | medium | high | critical (spec severity buckets)
+  severity        String
+  findings        Json      @default("[]")
+  analyzerVersion String?   @default("1.0.0")
+  analyzedAt      DateTime  @default(now())
+  expiresAt       DateTime?
+  jobId           String?
+
+  @@index([contractId, analyzedAt(sort: Desc)])
+  @@map("contract_risk_scores")
+}
+
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  hashedPassword String?
+  role           String    @default("user")
+  plan           String    @default("free")
+  createdAt      DateTime  @default(now())
+  apiKeys        ApiKey[]
+
+  @@map("users")
+}
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  keyHash     String    @unique
+  keyPrefix   String?
+  name        String?
+  scopes      String[]  @default(["read"])
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revoked     Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+  @@map("api_keys")
+}
+
+/// Spec §4.2.5
+model MarketEvent {
+  id            String   @id @default(uuid())
+  chainId       String
+  tokenAddress  String
+  eventType     String
+  severity      String
+  txHash        String?
+  blockNumber   BigInt?
+  evidence      Json?
+  detectedAt    DateTime @default(now())
+
+  @@index([tokenAddress, detectedAt(sort: Desc)])
+  @@index([eventType, severity])
+  @@map("market_events")
+}
+
+model WalletReputationScore {
+  id             String   @id @default(uuid())
+  walletId       String
+  wallet         Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  score          Int
+  mixerProximity Int?
+  sanctionFlag   Boolean  @default(false)
+  subScores      Json?
+  profiledAt     DateTime @default(now())
+
+  @@index([walletId, profiledAt(sort: Desc)])
+  @@map("wallet_reputation_scores")
+}
+
+model ContractFinding {
+  id          String       @id @default(cuid())
+  contractId  String
+  findingType FindingType
+  severity    Severity
+  title       String
+  description String
+  details     Json?        // Additional structured data
+  confidence  Float?       // 0-1 confidence score
+  riskScore   Int?         // 0-100 risk score
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  // Relations
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@index([contractId])
+  @@index([findingType])
+  @@index([severity])
+  @@index([riskScore])
+  @@index([isActive])
+  @@map("contract_findings")
+}
+
+model Wallet {
+  id            String    @id @default(cuid())
+  chainId       String    @default("1")
+  address       String
+  label         String?
+  isContract    Boolean   @default(false)
+  isBlacklisted Boolean   @default(false)
+  isWhitelisted Boolean   @default(false)
+  riskLevel     RiskLevel?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  tokenRelations WalletTokenRelation[]
+  incidents      IncidentEntity[]
+  reputation     WalletReputationScore[]
+
+  @@unique([chainId, address])
+  @@index([address])
+  @@index([chainId])
+  @@index([isBlacklisted])
+  @@index([isWhitelisted])
+  @@index([riskLevel])
+  @@map("wallets")
+}
+
+model Token {
+  id          String   @id @default(cuid())
+  address     String   @unique
+  name        String
+  symbol      String
+  decimals    Int
+  network     Network
+  totalSupply String?
+  holderCount Int?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  walletRelations WalletTokenRelation[]
+  metrics       TokenMetrics[]
+
+  // Indexes
+  @@index([address])
+  @@index([network])
+  @@index([symbol])
+  @@index([isActive])
+  @@map("tokens")
+}
+
+model WalletTokenRelation {
+  id          String   @id @default(cuid())
+  walletId    String
+  tokenId     String
+  balance     String
+  usdValue    Float?   // Current USD value
+  percentage  Float?   // Percentage of wallet's total value
+  firstSeen   DateTime @default(now())
+  lastSeen    DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  token  Token  @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@unique([walletId, tokenId])
+  @@index([walletId])
+  @@index([tokenId])
+  @@index([usdValue])
+  @@map("wallet_token_relations")
+}
+
+model TokenMetrics {
+  id             String   @id @default(cuid())
+  tokenId         String   @unique
+  contractId     String?  // If it's a contract token
+  price          Float?
+  marketCap      Float?
+  volume24h      Float?
+  liquidity      Float?
+  holders        Int?
+  riskScore      Int?     // 0-100
+  volatility24h  Float?
+  priceChange24h Float?
+  lastUpdated    DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  token    Token    @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  contract Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  // Indexes
+  @@index([tokenId])
+  @@index([contractId])
+  @@index([riskScore])
+  @@index([lastUpdated])
+  @@map("token_metrics")
+}
+
+model Incident {
+  id          String         @id @default(cuid())
+  title       String
+  description String
+  incidentType IncidentType
+  status      IncidentStatus @default(OPEN)
+  severity    Severity
+  riskLevel   RiskLevel
+  network     Network?
+  amount      String?        // Amount lost/stolen
+  currency    String?        // Currency type
+  reportedBy  String?
+  source      String?        // Source of incident report
+  externalUrl String?        // Link to external report
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  // Relations
+  entities   IncidentEntity[]
+  findings   IncidentFinding[]
+
+  // Indexes
+  @@index([incidentType])
+  @@index([status])
+  @@index([severity])
+  @@index([riskLevel])
+  @@index([network])
+  @@index([createdAt])
+  @@index([isActive])
+  @@map("incidents")
+}
+
+model IncidentEntity {
+  id         String   @id @default(cuid())
+  incidentId String
+  entityType String   // 'contract' or 'wallet'
+  entityId   String   // ID of the related entity
+  role       String?  // 'victim', 'attacker', 'related'
+  details    Json?    // Additional entity-specific data
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade, map: "incident_entities_incidentId_fkey")
+  contract Contract? @relation(fields: [entityId], references: [id], onDelete: Cascade, map: "incident_entities_contractId_fkey")
+  wallet   Wallet?   @relation(fields: [entityId], references: [id], onDelete: Cascade, map: "incident_entities_walletId_fkey")
+
+  // Indexes
+  @@unique([incidentId, entityType, entityId])
+  @@index([incidentId])
+  @@index([entityType])
+  @@index([entityId])
+  @@map("incident_entities")
+}
+
+model IncidentFinding {
+  id          String       @id @default(cuid())
+  incidentId  String
+  findingType FindingType
+  severity    Severity
+  title       String
+  description String
+  details     Json?        // Additional structured data
+  confidence  Float?       // 0-1 confidence score
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  // Relations
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@index([incidentId])
+  @@index([findingType])
+  @@index([severity])
+  @@index([isActive])
+  @@map("incident_findings")
+}

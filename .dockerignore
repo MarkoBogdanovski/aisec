@@ -1,0 +1,9 @@
+apps/backend/node_modules
+apps/backend/dist
+apps/frontend/node_modules
+apps/frontend/dist
+node_modules
+.git
+.vscode
+postman
+npm-debug.log*
