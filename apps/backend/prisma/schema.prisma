@@ -191,8 +191,12 @@ model WalletReputationScore {
   score          Int
   mixerProximity Int?
   sanctionFlag   Boolean  @default(false)
+  classification String?
+  archetype      String?
+  confidenceScore Float?
   subScores      Json?
   profiledAt     DateTime @default(now())
+  jobId          String?
 
   @@index([walletId, profiledAt(sort: Desc)])
   @@map("wallet_reputation_scores")
@@ -228,18 +232,20 @@ model Wallet {
   id            String    @id @default(cuid())
   chainId       String    @default("1")
   address       String
+  network       Network
   label         String?
   isContract    Boolean   @default(false)
   isBlacklisted Boolean   @default(false)
   isWhitelisted Boolean   @default(false)
   riskLevel     RiskLevel?
+  walletType    String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   // Relations
   tokenRelations WalletTokenRelation[]
   incidents      IncidentEntity[]
-  reputation     WalletReputationScore[]
+  reputationScores WalletReputationScore[]
 
   @@unique([chainId, address])
   @@index([address])
@@ -248,6 +254,18 @@ model Wallet {
   @@index([isWhitelisted])
   @@index([riskLevel])
   @@map("wallets")
+}
+
+// Sanctioned addresses table — referenced by feature extractor
+model SanctionedAddress {
+  id        String   @id @default(cuid())
+  address   String   @unique
+  source    String?  // optional source or list name
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@index([address])
+  @@map("sanctioned_addresses")
 }
 
 model Token {

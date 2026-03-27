@@ -10,8 +10,8 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ethers } from 'ethers';
-import { PrismaService } from '../../common/database/prisma.service';
-import { RedisService }  from '../../common/redis/redis.service';
+import { PrismaService } from '../../../common/database/prisma.service';
+import { RedisService }  from '../../../common/redis/redis.service';
 import { WalletFeatures } from '../types/risk-engine.types';
 
 // Known protocol addresses — extend this from DB in production

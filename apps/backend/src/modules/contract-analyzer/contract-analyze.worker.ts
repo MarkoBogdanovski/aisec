@@ -5,6 +5,8 @@ import { QUEUE_CONTRACT_ANALYZE } from '../../queues/queue.constants';
 import { ContractAnalyzerService } from './contract-analyzer.service';
 import { ContractAnalysisJobDto } from './dto/contract-analysis.dto';
 import { JobUpdatesService } from './job-updates.service';
+import { WalletRiskEngineService } from '../risk-engine/wallet-risk-engine.service';
+import { WalletFeatureExtractor } from '../risk-engine/stages/feature-extractor.service';
 
 @Injectable()
 export class ContractAnalyzeWorkerService implements OnModuleInit {
@@ -14,6 +16,8 @@ export class ContractAnalyzeWorkerService implements OnModuleInit {
     private readonly queueService: QueueService,
     private readonly contractAnalyzerService: ContractAnalyzerService,
     private readonly jobUpdates: JobUpdatesService,
+    private readonly riskEngine: WalletRiskEngineService,
+    private readonly featureExtractor: WalletFeatureExtractor,
   ) {}
 
   onModuleInit(): void {
@@ -46,7 +50,7 @@ export class ContractAnalyzeWorkerService implements OnModuleInit {
           }
 
           const analysis = await this.contractAnalyzerService.getAnalysisByJobId(String(job.id), payload);
-          const update = {
+          const update: any = {
             job_id: String(job.id),
             status: 'completed',
             ready: Boolean(analysis),
@@ -56,6 +60,19 @@ export class ContractAnalyzeWorkerService implements OnModuleInit {
             result_url: resultUrl,
             analysis: analysis ?? undefined,
           };
+
+          // If a deployer address was found, run the wallet risk engine and attach result
+          if (result.deployerAddress) {
+            try {
+              const rpcUrl = payload.rpcUrl || process.env.ETHEREUM_RPC_URL || '';
+              const provider = new (require('ethers').JsonRpcProvider)(rpcUrl);
+              const features = await this.featureExtractor.extract(result.deployerAddress, payload.chainId ?? '1', provider);
+              const walletRisk = await this.riskEngine.score(features);
+              update.deployer_risk = walletRisk;
+            } catch (err) {
+              this.logger.warn(`Deployer risk scoring failed: ${(err as Error).message}`);
+            }
+          }
 
           this.jobUpdates.publishJobStatus(update);
           this.jobUpdates.publishJobResult(update);

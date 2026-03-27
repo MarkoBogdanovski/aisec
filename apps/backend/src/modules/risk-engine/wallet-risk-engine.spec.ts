@@ -10,8 +10,7 @@ import { WalletClassifierService }  from '../stages/wallet-classifier.service';
 import { RiskFactorService }        from '../stages/risk-factor.service';
 import { ConfidenceScorerService }  from '../stages/confidence-scorer.service';
 import { FinalClassifierService }   from '../stages/final-classifier.service';
-import { RiskClassification, WalletArchetype, WalletFeatures }
-  from '../types/risk-engine.types';
+import { RiskClassification, WalletArchetype, WalletFeatures } from '../types/risk-engine.types';
 
 // ── Test fixture factory ─────────────────────────────────────────────────────
 

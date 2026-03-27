@@ -4,7 +4,7 @@ import { IsOptional, IsString } from 'class-validator';
 import { ethers } from 'ethers';
 import { WalletIntelligenceService } from './wallet-intelligence.service';
 
-class AnalyzeWalletV1Dto {
+class AnalyzeWalletIntelligenceV1Dto {
   @ApiProperty({ example: '1' })
   @IsString()
   chain_id: string;
@@ -29,7 +29,7 @@ export class WalletIntelligenceController {
   @ApiOperation({
     summary: 'Profile wallet address from live chain data',
   })
-  async analyzeWallet(@Body() body: AnalyzeWalletV1Dto) {
+  async analyzeWallet(@Body() body: AnalyzeWalletIntelligenceV1Dto) {
     try {
       ethers.getAddress(body.wallet_address.trim());
     } catch {

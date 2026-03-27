@@ -21,6 +21,7 @@ import {
   Severity,
 } from './dto/contract-analysis.dto';
 import type { ContractAnalysisView } from './job-updates.types';
+import { WalletIntelligenceService } from '../wallet/wallet-intelligence.service';
 
 const ANALYZER_VERSION = '1.0.0';
 const ANALYSIS_CACHE_TTL_SEC = 86400;
@@ -100,25 +101,9 @@ function severityBucket(score: number): string {
 
 function aggregateRiskScore(findings: ContractFindingDto[]): number {
   if (!findings.length) return 0;
-
-  // Separate critical/confirmed findings from informational ones
-  const criticalFindings = findings.filter(
-    (f) => f.severity === Severity.CRITICAL || f.severity === Severity.HIGH,
-  );
-  const infoFindings = findings.filter(
-    (f) => f.severity === Severity.LOW || f.severity === Severity.INFORMATIONAL,
-  );
-
-  if (!criticalFindings.length && !infoFindings.length) return 0;
-
-  // Weighted average instead of max+bonus
-  const totalWeight = findings.reduce((sum, f) => sum + (f.riskScore ?? 0), 0);
-  const weightedAvg = totalWeight / findings.length;
-
-  // Only amplify when multiple HIGH/CRITICAL findings agree
-  const amplifier = criticalFindings.length >= 2 ? 1.2 : 1.0;
-
-  return Math.min(100, Math.round(weightedAvg * amplifier));
+  const max = Math.max(...findings.map((f) => f.riskScore ?? 0));
+  const bonus = Math.min(30, (findings.length - 1) * 4);
+  return Math.min(100, max + bonus);
 }
 
 function toPrismaFindingType(t: FindingType): PrismaFindingType {
@@ -164,6 +149,7 @@ export class ContractAnalyzerService {
     private readonly queueService: QueueService,
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly walletIntelligence: WalletIntelligenceService,
   ) {}
 
   async getLatestAnalysis(chainId: string, address: string): Promise<ContractAnalysisView | null> {
@@ -466,6 +452,22 @@ export class ContractAnalyzerService {
       );
 
       this.logger.log(`Contract analysis completed in ${duration}ms for ${checksumAddress}`);
+
+      // Trigger deployer wallet analysis (fire-and-forget) if deployer exists
+      try {
+        if (deployment.deployerAddress) {
+          this.walletIntelligence
+            .analyzeWallet({
+              walletAddress: deployment.deployerAddress,
+              chainId,
+              jobId: jobDto.jobId,
+            })
+            .catch((err) => this.logger.warn(`Deployer wallet analysis failed: ${(err as Error).message}`));
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to schedule deployer wallet analysis: ${(err as Error).message}`);
+      }
+
       return result;
     } catch (error) {
       const duration = Date.now() - startTime;
@@ -630,154 +632,124 @@ export class ContractAnalyzerService {
     };
   }
 
-  private async detectSecurityPatterns(
-    functions: ContractFunctionShape[],
-    contractMeta: {
-      isProxy: boolean;
-      isVerified: boolean;
-      deploymentAgeBlocks?: number;
-    },
-  ): Promise<ContractFindingDto[]> {
+  private async detectSecurityPatterns(functions: ContractFunctionShape[]): Promise<ContractFindingDto[]> {
     const findings: ContractFindingDto[] = [];
-    const names = functions.map((f) => f.name.toLowerCase());
-  
-    // ── MINT: only flag if NO owner/role functions exist alongside it ──
-    const hasMint = names.some((n) => n === 'mint' || n === 'safemint');
-    const hasAccessControl =
-      names.includes('owner') ||
-      names.includes('hasrole') ||
-      names.includes('onlyminter') ||
-      names.includes('renounceownership') ||
-      names.includes('grantRole');      // OZ AccessControl
-  
-    if (hasMint && !hasAccessControl) {
-      findings.push({
-        findingType: FindingType.VULNERABILITY,
-        severity: Severity.HIGH,
-        title: 'Unprotected Mint Function',
-        description:
-          'Contract exposes a mint function with no detectable access-control ' +
-          'sibling (no owner(), hasRole(), or renounceOwnership()). ' +
-          'Anyone may be able to mint tokens.',
-        details: { recommendation: 'Add onlyOwner or AccessControl modifier', cwe: 'CWE-862' },
-        confidence: 0.70,   // reduced — we cannot read modifiers from bytecode
-        riskScore: 75,
-      });
+
+    try {
+      const mintFunction = functions.find(
+        (f) =>
+          f.name.toLowerCase().includes('mint') &&
+          ['public', 'external', 'nonpayable', 'payable'].includes(String(f.visibility).toLowerCase()),
+      );
+
+      if (mintFunction) {
+        const hasAccessControl = this.checkFunctionAccessControl(mintFunction);
+        if (!hasAccessControl) {
+          findings.push({
+            findingType: FindingType.VULNERABILITY,
+            severity: Severity.HIGH,
+            title: 'Unprotected Mint Function',
+            description: 'The mint function lacks access controls, allowing unlimited token creation.',
+            details: {
+              function: mintFunction.name,
+              recommendation: 'Add onlyOwner modifier or similar access control',
+              cwe: 'CWE-862',
+            },
+            confidence: 0.85,
+            riskScore: 80,
+          });
+        }
+      }
+
+      const pauseFunction = functions.find(
+        (f) =>
+          f.name.toLowerCase().includes('pause') &&
+          ['public', 'external', 'nonpayable', 'payable'].includes(String(f.visibility).toLowerCase()),
+      );
+
+      if (pauseFunction) {
+        findings.push({
+          findingType: FindingType.SECURITY_BEST_PRACTICE,
+          severity: Severity.MEDIUM,
+          title: 'Contract Pause Functionality Detected',
+          description: 'Contract includes pause functionality which can be used to halt operations.',
+          details: {
+            function: pauseFunction.name,
+            recommendation: 'Ensure pause function is properly secured and transparent',
+          },
+          confidence: 0.75,
+          riskScore: 60,
+        });
+      }
+
+      const blacklistFunction = functions.find(
+        (f) =>
+          f.name.toLowerCase().includes('blacklist') &&
+          ['public', 'external', 'nonpayable', 'payable'].includes(String(f.visibility).toLowerCase()),
+      );
+
+      if (blacklistFunction) {
+        findings.push({
+          findingType: FindingType.GOVERNANCE_RISK,
+          severity: Severity.MEDIUM,
+          title: 'Blacklist Functionality Detected',
+          description: 'Contract includes blacklist functionality for addresses.',
+          details: {
+            function: blacklistFunction.name,
+            recommendation: 'Ensure blacklist is governed by community or transparent rules',
+          },
+          confidence: 0.8,
+          riskScore: 65,
+        });
+      }
+
+      const ownerFunctions = functions.filter(
+        (f) =>
+          (f.name.toLowerCase().includes('owner') ||
+            f.name.toLowerCase().includes('transferownership')) &&
+          ['public', 'external', 'nonpayable', 'payable'].includes(String(f.visibility).toLowerCase()),
+      );
+
+      if (ownerFunctions.length > 0) {
+        findings.push({
+          findingType: FindingType.GOVERNANCE_RISK,
+          severity: Severity.MEDIUM,
+          title: 'Owner Privilege Functions Detected',
+          description: `Contract contains ${ownerFunctions.length} functions with owner privileges.`,
+          details: {
+            functions: ownerFunctions.map((f) => f.name),
+            recommendation: 'Ensure ownership transfer is secure and transparent',
+          },
+          confidence: 0.9,
+          riskScore: 55,
+        });
+      }
+
+      const upgradeFunctions = functions.filter(
+        (f) =>
+          f.name.toLowerCase().includes('upgrade') ||
+          f.name.toLowerCase().includes('implementation') ||
+          f.name.toLowerCase().includes('proxy'),
+      );
+
+      if (upgradeFunctions.length > 0) {
+        findings.push({
+          findingType: FindingType.SUSPICIOUS_PATTERN,
+          severity: Severity.HIGH,
+          title: 'Proxy/Upgradeability Pattern Detected',
+          description: `Contract contains ${upgradeFunctions.length} functions related to proxy patterns or upgrades.`,
+          details: {
+            functions: upgradeFunctions.map((f) => f.name),
+            recommendation: 'Verify upgrade mechanism is secure and transparent',
+          },
+          confidence: 0.88,
+          riskScore: 75,
+        });
+      }
+    } catch (error) {
+      this.logger.error(`Security pattern detection failed: ${(error as Error).message}`, (error as Error).stack);
     }
-  
-    // ── MINT with access control: informational only ──
-    if (hasMint && hasAccessControl) {
-      findings.push({
-        findingType: FindingType.INFORMATIONAL,
-        severity: Severity.INFORMATIONAL,
-        title: 'Mint Function with Access Control',
-        description: 'Contract has a mint function protected by access control. Standard pattern.',
-        confidence: 0.8,
-        riskScore: 10,       // near-zero impact on score
-      });
-    }
-  
-    // ── PAUSE: informational only — this is a safety feature ──
-    const hasPause = names.some((n) => n === 'pause' || n === 'pauseall');
-    if (hasPause) {
-      findings.push({
-        findingType: FindingType.INFORMATIONAL,
-        severity: Severity.INFORMATIONAL,
-        title: 'Pausable Contract',
-        description:
-          'Contract implements pause/unpause. This is a standard OpenZeppelin safety ' +
-          'pattern used by USDC, Aave, and most audited DeFi protocols.',
-        confidence: 0.9,
-        riskScore: 5,        // effectively zero contribution to score
-      });
-    }
-  
-    // ── BLACKLIST: medium only, not high ──
-    const hasBlacklist = names.some(
-      (n) => n === 'blacklist' || n === 'addtoblacklist' || n === 'blocklist',
-    );
-    if (hasBlacklist) {
-      findings.push({
-        findingType: FindingType.GOVERNANCE_RISK,
-        severity: Severity.MEDIUM,
-        title: 'Blacklist Capability',
-        description:
-          'Contract can blacklist addresses. Legitimate use exists (USDC, regulatory ' +
-          'compliance) but centralises control. Verify governance.',
-        details: { recommendation: 'Check if blacklist is governed by multisig or timelock' },
-        confidence: 0.75,
-        riskScore: 35,       // was 65 — now proportionate
-      });
-    }
-  
-    // ── OWNER FUNCTIONS: only flag if renounceOwnership is ABSENT ──
-    const hasOwner = names.includes('owner') || names.includes('transferownership');
-    const hasRenounce = names.includes('renounceownership');
-  
-    if (hasOwner && !hasRenounce) {
-      findings.push({
-        findingType: FindingType.GOVERNANCE_RISK,
-        severity: Severity.MEDIUM,
-        title: 'Non-Renounceable Ownership',
-        description:
-          'Contract has owner functions but no renounceOwnership(). ' +
-          'Owner retains permanent control with no exit path.',
-        details: { recommendation: 'Add renounceOwnership() or use a multisig/timelock' },
-        confidence: 0.8,
-        riskScore: 40,
-      });
-    }
-  
-    // If renounce IS present — entirely informational
-    if (hasOwner && hasRenounce) {
-      findings.push({
-        findingType: FindingType.INFORMATIONAL,
-        severity: Severity.INFORMATIONAL,
-        title: 'Standard Ownable Pattern',
-        description:
-          'Contract uses OpenZeppelin Ownable with renounceOwnership(). Standard pattern.',
-        confidence: 0.95,
-        riskScore: 5,
-      });
-    }
-  
-    // ── PROXY/UPGRADE: only HIGH if no timelock pattern detected ──
-    const hasUpgrade = names.some(
-      (n) => n === 'upgradeto' || n === 'upgradetoandcall',
-    );
-    const hasTimelock = names.some(
-      (n) => n.includes('timelock') || n.includes('delay') || n === 'schedule' || n === 'queue',
-    );
-  
-    if (hasUpgrade && !hasTimelock) {
-      // Only HIGH if not a known proxy standard
-      const isKnownProxy = contractMeta.isProxy;
-      findings.push({
-        findingType: FindingType.SUSPICIOUS_PATTERN,
-        severity: isKnownProxy ? Severity.MEDIUM : Severity.HIGH,
-        title: isKnownProxy
-          ? 'Upgradeable Proxy (Standard Pattern)'
-          : 'Upgradeability Without Timelock',
-        description: isKnownProxy
-          ? 'Contract is a standard UUPS/Transparent proxy. Verify the proxy admin.'
-          : 'Contract can be upgraded without a timelock delay. Logic can change without warning.',
-        details: { recommendation: 'Add a TimelockController before the proxy admin' },
-        confidence: isKnownProxy ? 0.6 : 0.8,
-        riskScore: isKnownProxy ? 30 : 65,
-      });
-    }
-  
-    if (hasUpgrade && hasTimelock) {
-      findings.push({
-        findingType: FindingType.INFORMATIONAL,
-        severity: Severity.INFORMATIONAL,
-        title: 'Upgradeable with Timelock',
-        description: 'Proxy upgrades are gated by a timelock. Good practice.',
-        confidence: 0.85,
-        riskScore: 10,
-      });
-    }
-  
+
     return findings;
   }
 

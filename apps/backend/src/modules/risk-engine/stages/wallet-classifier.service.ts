@@ -155,6 +155,16 @@ export class WalletClassifierService {
     return Math.min(0.95, 0.6 + protocolBoost + dexBoost);
   }
 
+  private traderSignals(f: WalletFeatures): string[] {
+    const signals: string[] = [];
+    if (f.dexInteractions > 0) signals.push(`DEX interactions: ${f.dexInteractions}`);
+    if (f.defiProtocols && f.defiProtocols.length > 0) {
+      signals.push(`DeFi protocols: ${f.defiProtocols.join(', ')}`);
+    }
+    if (f.txCount > 0) signals.push(`Tx count: ${f.txCount}`);
+    return signals.length ? signals : ['Frequent trading activity detected'];
+  }
+
   private normalConfidence(f: WalletFeatures): number {
     const ageDays = walletAgeDays(f.firstSeenAt);
     // Older wallets with more counterparties = more data = more confident

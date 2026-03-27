@@ -77,6 +77,7 @@ export class WalletIntelligenceService {
         address: checksumAddress,
         isContract,
         riskLevel,
+        network,
       },
       update: {
         isContract,
