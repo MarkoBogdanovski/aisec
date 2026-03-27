@@ -23,6 +23,7 @@ enum FindingType {
 }
 
 enum Severity {
+  INFORMATIONAL
   LOW
   MEDIUM
   HIGH
@@ -193,6 +194,9 @@ model WalletReputationScore {
   sanctionFlag   Boolean  @default(false)
   subScores      Json?
   profiledAt     DateTime @default(now())
+  classification  String?   // new: "SAFE" | "LOW_RISK" | "RISKY" | "MALICIOUS" | "UNKNOWN"
+  archetype       String?   // new: "NEW" | "NORMAL" | "TRADER" | "DEPLOYER" | "BOT" | "WHALE"
+  confidenceScore Float?    // new: 0–1
 
   @@index([walletId, profiledAt(sort: Desc)])
   @@map("wallet_reputation_scores")
@@ -381,6 +385,13 @@ model IncidentEntity {
   @@index([entityType])
   @@index([entityId])
   @@map("incident_entities")
+}
+
+model SanctionedAddress {
+  id        String   @id @default(cuid())
+  address   String   @unique  // lowercase
+  source    String             // "OFAC" | "UN" | "EU"
+  addedAt   DateTime @default(now())
 }
 
 model IncidentFinding {

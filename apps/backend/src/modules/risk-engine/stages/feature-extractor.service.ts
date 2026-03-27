@@ -10,8 +10,8 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ethers } from 'ethers';
-import { PrismaService } from '../../common/database/prisma.service';
-import { RedisService }  from '../../common/redis/redis.service';
+import { PrismaService } from '../../../common/database/prisma.service';
+import { RedisService }  from '../../../common/redis/redis.service';
 import { WalletFeatures } from '../types/risk-engine.types';
 
 // Known protocol addresses — extend this from DB in production
@@ -83,9 +83,6 @@ export class WalletFeatureExtractor {
     ] = await Promise.all([
       this.prisma.wallet.findUnique({
         where: { chainId_address: { chainId, address: checksummed } },
-        include: {
-          reputationScores: { orderBy: { profiledAt: 'desc' }, take: 1 },
-        },
       }).catch(() => null),
 
       provider.getBalance(checksummed).catch(() => 0n),

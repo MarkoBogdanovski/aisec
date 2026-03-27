@@ -100,12 +100,8 @@ export class WalletIntelligenceService {
         create: {
           chainId:     result.chainId,
           address:     result.address,
-          network,
-          walletType:  result.archetype,
         },
-        update: {
-          walletType: result.archetype,
-        },
+        update: {},
       });
 
       await this.prisma.walletReputationScore.create({
@@ -118,7 +114,6 @@ export class WalletIntelligenceService {
           sanctionFlag:  result.factors.some(f => f.name === 'SANCTIONED_ADDRESS'),
           mixerProximity: this.extractMixerHops(result),
           subScores:     result.factors as object[],
-          jobId:         jobId ?? null,
         },
       });
     } catch (error) {

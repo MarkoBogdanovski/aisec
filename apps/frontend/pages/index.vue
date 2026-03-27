@@ -4,7 +4,7 @@
 
     <div class="relative z-10 mx-auto flex w-full max-w-6xl flex-col items-center text-center">
       <p class="animate-rise text-sm font-semibold tracking-[0.12em] text-neutral-300 md:text-base">
-        OSINT Platform Search
+        AISEC Platform Search
       </p>
 
       <h1 class="animate-rise-delay mt-8 max-w-5xl bg-gradient-to-r from-emerald-200 via-green-300 to-emerald-500 bg-clip-text text-5xl font-black leading-[0.92] tracking-[-0.05em] text-transparent sm:text-6xl md:text-7xl lg:text-[6.25rem]">

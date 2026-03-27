@@ -188,4 +188,9 @@ export class WalletClassifierService {
       `Repetition ratio: ${(f.txCount / Math.max(1, f.uniqueCounterparties)).toFixed(1)} txs/counterparty`,
     ];
   }
+
+  private traderSignals(f: WalletFeatures): string[] {
+    // TODO: Implement actual logic for trader signals
+    return ['Frequent DEX/DeFi interactions'];
+  }
 }

@@ -8,7 +8,7 @@
             <div class="flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-white/5 shadow-[0_0_32px_rgba(34,197,94,0.18)]">
               <div class="h-5 w-5 rounded-full border-[3px] border-white border-r-transparent"></div>
             </div>
-            <span class="text-2xl font-black tracking-[0.28em]">OSINT</span>
+            <span class="text-2xl font-black tracking-[0.28em]">AISEC</span>
           </NuxtLink>
 
           <div class="hidden items-center gap-7 text-sm font-medium text-neutral-300 lg:flex">
