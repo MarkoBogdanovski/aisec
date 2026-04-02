@@ -11,6 +11,7 @@ import type {
   MarketEvent,
   TokenSummaryResponse,
 } from '~/types/api';
+import type { InvestigationResult } from '~/types/investigation';
 
 export const useApi = () => {
   const config = useRuntimeConfig();
@@ -49,5 +50,7 @@ export const useApi = () => {
     getTokenSummary: (address: string) => request<TokenSummaryResponse>(`/market/token/${address}`),
     analyzeWallet: (payload: AnalyzeWalletRequest) =>
       request<AnalyzeWalletResponse>('/analyze/wallet', { method: 'POST', body: payload }),
+    getInvestigation: (subjectType: 'wallet' | 'contract', chainId: string, address: string) =>
+      request<InvestigationResult>(`/investigations/${subjectType}/${chainId}/${address}`),
   };
 };

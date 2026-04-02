@@ -14,6 +14,7 @@ import { ContractAnalyzerModule } from './modules/contract-analyzer/contract-ana
 import { IncidentsModule } from './modules/incidents/incidents.module';
 import { MarketModule } from './modules/market/market.module';
 import { WalletIntelligenceModule } from './modules/wallet-intelligence/wallet-intelligence.module';
+import { InvestigationsModule } from './modules/investigations/investigations.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { WalletIntelligenceModule } from './modules/wallet-intelligence/wallet-i
     IncidentsModule,
     MarketModule,
     WalletIntelligenceModule,
+    InvestigationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

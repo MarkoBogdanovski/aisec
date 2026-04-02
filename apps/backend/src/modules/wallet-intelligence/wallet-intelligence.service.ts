@@ -3,12 +3,13 @@ import { Network, RiskLevel } from '@prisma/client';
 import { ethers } from 'ethers';
 import { PrismaService } from '../../common/database/prisma.service';
 import { chainIdFromNetwork, networkFromChainId } from '../../common/web3/chain-mapping';
+import { AnalysisStatus } from '../../enums/analysis-status.enum';
 
 const TRANSFER_EVENT_TOPIC = ethers.id('Transfer(address,address,uint256)');
 const ZERO_TOPIC_PADDED = '0x000000000000000000000000';
 
 type WalletProfileResult = {
-  status: 'completed';
+  status: AnalysisStatus;
   chain_id: string;
   wallet_address: string;
   network: Network;
@@ -102,7 +103,7 @@ export class WalletIntelligenceService {
     });
 
     return {
-      status: 'completed',
+      status: AnalysisStatus.COMPLETED,
       chain_id: chainId,
       wallet_address: checksumAddress,
       network,

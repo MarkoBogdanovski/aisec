@@ -54,11 +54,6 @@
       </button>
     </form>
 
-    <div v-if="notImplemented" class="rounded-xl border border-emerald-400/30 bg-white/[0.03] p-3 backdrop-blur-xl">
-      <p class="text-xs font-medium text-neutral-200">Coming Soon</p>
-      <p class="mt-1 text-xs text-neutral-400">Wallet intelligence is using the frontend relation model until the backend path is ready.</p>
-    </div>
-
     <div v-if="error" class="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-300">
       {{ error }}
     </div>
@@ -69,7 +64,6 @@
 import { ref } from 'vue';
 import SearchableDropdown from '~/components/shared/SearchableDropdown.vue';
 import { useApi } from '~/composables/useApi';
-import { buildWalletInvestigation } from '~/composables/useInvestigationGraph';
 import type { InvestigationResult } from '~/types/investigation';
 
 const emit = defineEmits<{
@@ -82,10 +76,9 @@ interface AnalyzeWalletRequest {
   priority?: string;
 }
 
-const { request } = useApi();
+const { analyzeWallet, getInvestigation } = useApi();
 const loading = ref(false);
 const error = ref('');
-const notImplemented = ref(false);
 
 const form = ref<AnalyzeWalletRequest>({
   chain_id: '1',
@@ -111,21 +104,13 @@ const priorityOptions = [
 
 const submit = async () => {
   error.value = '';
-  notImplemented.value = false;
   loading.value = true;
   try {
-    await request('/analyze/wallet', {
-      method: 'POST',
-      body: form.value,
-    });
-    emit('completed', buildWalletInvestigation(form.value.chain_id, form.value.wallet_address));
+    const analysis = await analyzeWallet(form.value);
+    const investigation = await getInvestigation('wallet', analysis.chain_id, analysis.wallet_address);
+    emit('completed', investigation);
   } catch (err) {
-    if (err instanceof Error && err.message.includes('501')) {
-      notImplemented.value = true;
-      emit('completed', buildWalletInvestigation(form.value.chain_id, form.value.wallet_address));
-    } else {
-      error.value = err instanceof Error ? err.message : 'Analysis failed';
-    }
+    error.value = err instanceof Error ? err.message : 'Analysis failed';
   } finally {
     loading.value = false;
   }

@@ -70,7 +70,6 @@
 import { onBeforeUnmount, ref } from 'vue';
 import SearchableDropdown from '~/components/shared/SearchableDropdown.vue';
 import { useApi } from '~/composables/useApi';
-import { buildContractInvestigation } from '~/composables/useInvestigationGraph';
 import { useWebSocket } from '~/composables/useWebSocket';
 import type { AnalyzeContractRequest, ContractLatestResponse, JobResultResponse } from '~/types/api';
 import type { InvestigationResult } from '~/types/investigation';
@@ -79,7 +78,7 @@ const emit = defineEmits<{
   completed: [result: InvestigationResult];
 }>();
 
-const { analyzeContract, getJobResult } = useApi();
+const { analyzeContract, getJobResult, getInvestigation } = useApi();
 const { connected: socketConnected, subscribeToJob } = useWebSocket();
 const loading = ref(false);
 const jobId = ref<string | null>(null);
@@ -110,17 +109,18 @@ const priorityOptions = [
   { value: 'high', label: 'High', description: 'Fastest processing' },
 ];
 
-const finishWithAnalysis = (analysis: ContractLatestResponse) => {
+const finishWithAnalysis = async (analysis: ContractLatestResponse) => {
   loading.value = false;
   jobStatus.value = 'completed';
-  emit('completed', buildContractInvestigation(analysis.chain_id, analysis.contract_address, analysis));
+  const investigation = await getInvestigation('contract', analysis.chain_id, analysis.contract_address);
+  emit('completed', investigation);
 };
 
 const applyJobUpdate = (update: JobResultResponse) => {
   jobStatus.value = update.status;
 
   if (update.analysis) {
-    finishWithAnalysis(update.analysis);
+    void finishWithAnalysis(update.analysis);
     return;
   }
 

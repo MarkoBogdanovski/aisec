@@ -28,8 +28,22 @@ export interface AnalyzeWalletRequest {
 }
 
 export interface AnalyzeWalletResponse {
-  status: 'not_implemented';
-  message: string;
+  status: 'completed';
+  chain_id: string;
+  wallet_address: string;
+  network: string;
+  is_contract: boolean;
+  native_balance_wei: string;
+  native_balance: string;
+  nonce: number;
+  latest_block: number;
+  recent_token_transfers: number;
+  recent_activity_block?: number;
+  score: number;
+  risk_level: string;
+  sanction_flag: boolean;
+  mixer_proximity: number;
+  sub_scores: Record<string, number>;
 }
 
 export interface JobStatusResponse {
@@ -97,7 +111,19 @@ export interface MarketEvent {
 
 export interface TokenSummaryResponse {
   token_address: string;
+  symbol?: string | null;
+  name?: string | null;
   event_count: number;
   latest_severity: string;
+  latest_price?: number | null;
+  liquidity?: number | null;
+  volume_24h?: number | null;
+  token_risk_score?: number | null;
+  contract_risk_score?: number | null;
+  history?: Array<{
+    bucket: string;
+    events: number;
+    maxSeverity: string;
+  }>;
   recent_events: MarketEvent[];
 }
