@@ -11,6 +11,7 @@ const subscriptionCounts = new Map<string, number>();
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let shouldReconnect = true;
+let warnedAboutUnavailableSocket = false;
 
 const getSocketUrl = () => {
   const config = useRuntimeConfig();
@@ -42,10 +43,13 @@ const connect = () => {
   }
 
   shouldReconnect = true;
+  let opened = false;
   socket = new WebSocket(getSocketUrl());
 
   socket.onopen = () => {
+    opened = true;
     connected.value = true;
+    warnedAboutUnavailableSocket = false;
     flushSubscriptions();
   };
 
@@ -83,6 +87,13 @@ const connect = () => {
 
   socket.onerror = () => {
     connected.value = false;
+    if (!opened) {
+      shouldReconnect = false;
+      if (!warnedAboutUnavailableSocket && import.meta.dev) {
+        warnedAboutUnavailableSocket = true;
+        console.warn('[useWebSocket] Realtime job updates are unavailable. Falling back to polling.');
+      }
+    }
   };
 };
 

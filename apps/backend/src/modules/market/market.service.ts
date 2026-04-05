@@ -1,6 +1,7 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { Network } from '@prisma/client';
 import { ethers } from 'ethers';
+import { LoggerService } from '../../common/logger/logger.service';
 import { networkFromChainId } from '../../common/web3/chain-mapping';
 import {
   MarketAnalysisSource,
@@ -79,15 +80,18 @@ export type TokenMarketAnalysis = {
 
 @Injectable()
 export class MarketService {
-  private readonly logger = new Logger(MarketService.name);
+  private readonly context = MarketService.name;
   private readonly baseUrl = process.env.CRYPTOAPIS_BASE_URL || 'https://rest.cryptoapis.io';
   private readonly apiKey = process.env.CRYPTOAPIS_API_KEY || '';
+
+  constructor(private readonly logger: LoggerService) {}
 
   async analyzeTokenActivity(
     chainId: string,
     tokenAddress: string,
     walletAddress?: string,
   ): Promise<TokenMarketAnalysis> {
+    const startedAt = Date.now();
     if (!this.apiKey) {
       throw new ServiceUnavailableException('CRYPTOAPIS_API_KEY is not configured');
     }
@@ -95,6 +99,13 @@ export class MarketService {
     const checksummedToken = ethers.getAddress(tokenAddress.trim());
     const checksummedWallet = walletAddress ? ethers.getAddress(walletAddress.trim()) : undefined;
     const chain = this.toCryptoApisChain(chainId);
+
+    this.logger.logWithContext(this.context, 'Starting market token analysis', 'info', {
+      chainId,
+      tokenAddress: checksummedToken,
+      walletAddress: checksummedWallet,
+      type: 'market-analysis',
+    });
 
     const tokenDetails = await this.requestJson(
       `/contracts/evm/${chain.blockchain}/${chain.network}/${checksummedToken}/token-details`,
@@ -133,7 +144,7 @@ export class MarketService {
       : null;
 
     const score = this.computeScore(analysisSignals);
-    return {
+    const result = {
       chain_id: chainId,
       token_address: checksummedToken,
       source: MarketAnalysisSource.CRYPTOAPIS,
@@ -173,6 +184,14 @@ export class MarketService {
       },
       wallet_connection: walletConnection,
     };
+
+    this.logger.logPerformance('market-token-analysis', Date.now() - startedAt, {
+      context: this.context,
+      chainId,
+      tokenAddress: checksummedToken,
+      signalCount: analysisSignals.length,
+    });
+    return result;
   }
 
   private async requestJson(path: string): Promise<any> {
@@ -196,7 +215,11 @@ export class MarketService {
     try {
       return await this.requestJson(path);
     } catch (error) {
-      this.logger.warn(`Crypto APIs request failed for ${path}: ${(error as Error).message}`);
+      this.logger.logWithContext(this.context, 'Crypto APIs request failed', 'warn', {
+        path,
+        error: (error as Error).message,
+        type: 'market-api',
+      });
       return null;
     }
   }

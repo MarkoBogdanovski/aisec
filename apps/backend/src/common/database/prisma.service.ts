@@ -1,9 +1,9 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Inject } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
-import { WINSTON_MODULE_PROVIDER } from 'nest-winston';
-import { Logger } from 'winston';
+import { LoggerService } from '../logger/logger.service';
+import { resolveDatabaseProvider, resolveDatabaseUrl } from '../../config/database-url';
 
 @Injectable()
 export class PrismaService
@@ -11,13 +11,12 @@ export class PrismaService
   implements OnModuleInit, OnModuleDestroy
 {
   private readonly pool: Pool;
+  private readonly context = PrismaService.name;
 
-  constructor(@Inject(WINSTON_MODULE_PROVIDER) private readonly logger: Logger) {
-    const connectionString = process.env.DATABASE_URL;
+  constructor(private readonly logger: LoggerService) {
+    const connectionString = resolveDatabaseUrl('runtime');
     if (!connectionString) {
-      // Prisma 7 requires either an adapter or accelerateUrl in the PrismaClient ctor.
-      // We fail fast with a clear message if the app is started without DATABASE_URL.
-      throw new Error('Missing required environment variable: DATABASE_URL');
+      throw new Error('Missing required database connection string for the selected DATABASE_PROVIDER');
     }
 
     const pool = new Pool({ connectionString });
@@ -26,22 +25,10 @@ export class PrismaService
     super({
       adapter,
       log: [
-        {
-          emit: 'event',
-          level: 'query',
-        },
-        {
-          emit: 'event',
-          level: 'error',
-        },
-        {
-          emit: 'event',
-          level: 'info',
-        },
-        {
-          emit: 'event',
-          level: 'warn',
-        },
+        { emit: 'event', level: 'query' },
+        { emit: 'event', level: 'error' },
+        { emit: 'event', level: 'info' },
+        { emit: 'event', level: 'warn' },
       ],
     } as any);
 
@@ -49,32 +36,57 @@ export class PrismaService
   }
 
   async onModuleInit() {
+    const startedAt = Date.now();
     await this.$connect();
-    
+
     (this as any).$on('query', (e: Prisma.QueryEvent) => {
-      this.logger.debug('Query: ' + e.query);
-      this.logger.debug('Params: ' + e.params);
-      this.logger.debug('Duration: ' + e.duration + 'ms');
+      this.logger.logWithContext(this.context, 'Prisma query executed', 'debug', {
+        query: e.query,
+        params: e.params,
+        duration: e.duration,
+        type: 'database-query',
+      });
+      this.logger.logPerformance('prisma-query', e.duration, {
+        context: this.context,
+        query: e.query,
+      });
     });
 
     (this as any).$on('error', (e: Prisma.LogEvent) => {
-      this.logger.error('Database error:', e);
+      this.logger.error('Database error', e, {
+        context: this.context,
+        type: 'database',
+      });
     });
 
     (this as any).$on('info', (e: Prisma.LogEvent) => {
-      this.logger.info('Database info:', e);
+      this.logger.logWithContext(this.context, 'Database info', 'info', {
+        message: e.message,
+        type: 'database',
+      });
     });
 
     (this as any).$on('warn', (e: Prisma.LogEvent) => {
-      this.logger.warn('Database warning:', e);
+      this.logger.logWithContext(this.context, 'Database warning', 'warn', {
+        message: e.message,
+        type: 'database',
+      });
     });
 
-    this.logger.info('Database connected successfully');
+    this.logger.logPerformance('database-connect', Date.now() - startedAt, {
+      context: this.context,
+      provider: resolveDatabaseProvider(),
+    });
+    this.logger.logWithContext(this.context, 'Database connected successfully');
   }
 
   async onModuleDestroy() {
+    const startedAt = Date.now();
     await this.$disconnect();
     await this.pool.end();
-    this.logger.info('Database disconnected');
+    this.logger.logPerformance('database-disconnect', Date.now() - startedAt, {
+      context: this.context,
+    });
+    this.logger.logWithContext(this.context, 'Database disconnected');
   }
 }

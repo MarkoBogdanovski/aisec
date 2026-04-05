@@ -1,17 +1,18 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Inject } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
-import { WINSTON_MODULE_PROVIDER } from 'nest-winston';
-import { Logger } from 'winston';
+import { LoggerService } from '../logger/logger.service';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
+  private readonly context = RedisService.name;
   private client: Redis;
   private publisher: Redis;
   private subscriber: Redis;
 
-  constructor(@Inject(WINSTON_MODULE_PROVIDER) private readonly logger: Logger) {}
+  constructor(private readonly logger: LoggerService) {}
 
   async onModuleInit() {
+    const startedAt = Date.now();
     const redisConfig = {
       host: process.env.REDIS_HOST || 'localhost',
       port: parseInt(process.env.REDIS_PORT, 10) || 6379,
@@ -28,29 +29,43 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       this.subscriber = new Redis(redisConfig);
 
       this.client.on('connect', () => {
-        this.logger.info('Redis client connected');
+        this.logger.logWithContext(this.context, 'Redis client connected', 'info', {
+          type: 'redis',
+        });
       });
 
       this.client.on('error', (err) => {
-        this.logger.error('Redis client error:', err);
+        this.logger.error('Redis client error', err, {
+          context: this.context,
+          type: 'redis',
+        });
       });
 
       this.client.on('close', () => {
-        this.logger.info('Redis client connection closed');
+        this.logger.logWithContext(this.context, 'Redis client connection closed', 'info', {
+          type: 'redis',
+        });
       });
 
       await this.client.connect();
       await this.publisher.connect();
       await this.subscriber.connect();
 
-      this.logger.info('Redis connected successfully');
+      this.logger.logPerformance('redis-connect', Date.now() - startedAt, {
+        context: this.context,
+      });
+      this.logger.logWithContext(this.context, 'Redis connected successfully');
     } catch (error) {
-      this.logger.error('Failed to connect to Redis:', error);
+      this.logger.error('Failed to connect to Redis', error, {
+        context: this.context,
+        type: 'redis',
+      });
       throw error;
     }
   }
 
   async onModuleDestroy() {
+    const startedAt = Date.now();
     if (this.client) {
       await this.client.disconnect();
     }
@@ -60,10 +75,12 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     if (this.subscriber) {
       await this.subscriber.disconnect();
     }
-    this.logger.info('Redis disconnected');
+    this.logger.logPerformance('redis-disconnect', Date.now() - startedAt, {
+      context: this.context,
+    });
+    this.logger.logWithContext(this.context, 'Redis disconnected');
   }
 
-  // Basic Redis operations
   async get(key: string): Promise<string | null> {
     return this.client.get(key);
   }
@@ -91,7 +108,6 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client.ttl(key);
   }
 
-  // Hash operations
   async hget(key: string, field: string): Promise<string | null> {
     return this.client.hget(key, field);
   }
@@ -108,7 +124,6 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client.hdel(key, field);
   }
 
-  // List operations
   async lpush(key: string, ...values: string[]): Promise<number> {
     return this.client.lpush(key, ...values);
   }
@@ -129,7 +144,6 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client.lrange(key, start, stop);
   }
 
-  // Set operations
   async sadd(key: string, ...members: string[]): Promise<number> {
     return this.client.sadd(key, ...members);
   }
@@ -146,7 +160,6 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client.sismember(key, member);
   }
 
-  // Pub/Sub operations
   async publish(channel: string, message: string): Promise<number> {
     return this.publisher.publish(channel, message);
   }
@@ -156,7 +169,6 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     this.subscriber.on('message', callback);
   }
 
-  // Get raw clients for advanced operations
   getClient(): Redis {
     return this.client;
   }

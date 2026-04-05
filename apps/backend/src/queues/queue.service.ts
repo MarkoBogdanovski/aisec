@@ -1,8 +1,7 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Inject } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Queue, Worker, QueueOptions, WorkerOptions, Job } from 'bullmq';
 import { RedisService } from '../common/redis/redis.service';
-import { WINSTON_MODULE_PROVIDER } from 'nest-winston';
-import { Logger } from 'winston';
+import { LoggerService } from '../common/logger/logger.service';
 
 export interface QueueJobData {
   [key: string]: any;
@@ -14,37 +13,33 @@ export interface QueueProcessor<T = QueueJobData> {
 
 @Injectable()
 export class QueueService implements OnModuleInit, OnModuleDestroy {
+  private readonly context = QueueService.name;
   private queues: Map<string, Queue> = new Map();
   private workers: Map<string, Worker> = new Map();
 
   constructor(
-    @Inject(WINSTON_MODULE_PROVIDER) private readonly logger: Logger,
+    private readonly logger: LoggerService,
     private readonly redisService: RedisService,
   ) {}
 
   async onModuleInit() {
-    this.logger.info('Queue service initialized');
+    this.logger.logWithContext(this.context, 'Queue service initialized');
   }
 
   async onModuleDestroy() {
-    // Close all workers
     for (const [name, worker] of this.workers) {
       await worker.close();
-      this.logger.info(`Worker for queue ${name} closed`);
+      this.logger.logWithContext(this.context, `Worker for queue ${name} closed`);
     }
 
-    // Close all queues
     for (const [name, queue] of this.queues) {
       await queue.close();
-      this.logger.info(`Queue ${name} closed`);
+      this.logger.logWithContext(this.context, `Queue ${name} closed`);
     }
 
-    this.logger.info('Queue service shutdown complete');
+    this.logger.logWithContext(this.context, 'Queue service shutdown complete');
   }
 
-  /**
-   * Create a new queue
-   */
   createQueue(name: string, options?: Partial<QueueOptions>): Queue {
     if (this.queues.has(name)) {
       return this.queues.get(name)!;
@@ -65,21 +60,18 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.queues.set(name, queue);
-    this.logger.info(`Queue ${name} created`);
+    this.logger.logWithContext(this.context, `Queue ${name} created`, 'info', {
+      queueName: name,
+      type: 'queue',
+    });
 
     return queue;
   }
 
-  /**
-   * Get an existing queue
-   */
   getQueue(name: string): Queue | undefined {
     return this.queues.get(name);
   }
 
-  /**
-   * Fetch a job by id (queue must have been created or had jobs enqueued).
-   */
   async getJob<T = QueueJobData>(queueName: string, jobId: string): Promise<Job<T> | undefined> {
     const queue = this.getQueue(queueName);
     if (!queue) {
@@ -89,9 +81,6 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     return job ?? undefined;
   }
 
-  /**
-   * Create a worker for processing jobs
-   */
   createWorker<T = QueueJobData>(
     queueName: string,
     processor: QueueProcessor<T>['process'],
@@ -104,13 +93,32 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const worker = new Worker(
       queueName,
       async (job: Job<T>) => {
-        this.logger.info(`Processing job ${job.id} from queue ${queueName}`);
+        const startedAt = Date.now();
+        this.logger.logWithContext(this.context, `Processing job ${job.id} from queue ${queueName}`, 'info', {
+          queueName,
+          jobId: String(job.id),
+          type: 'queue-job',
+        });
         try {
           const result = await processor(job);
-          this.logger.info(`Job ${job.id} completed successfully`);
+          this.logger.logPerformance(`queue:${queueName}:job:${job.id}`, Date.now() - startedAt, {
+            context: this.context,
+            queueName,
+            jobId: String(job.id),
+          });
+          this.logger.logWithContext(this.context, `Job ${job.id} completed successfully`, 'info', {
+            queueName,
+            jobId: String(job.id),
+            type: 'queue-job',
+          });
           return result;
         } catch (error) {
-          this.logger.error(`Job ${job.id} failed:`, error);
+          this.logger.error(`Job ${job.id} failed`, error, {
+            context: this.context,
+            queueName,
+            jobId: String(job.id),
+            type: 'queue-job',
+          });
           throw error;
         }
       },
@@ -121,28 +129,40 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       },
     );
 
-    // Worker event listeners
     worker.on('completed', (job) => {
-      this.logger.info(`Job ${job.id} completed in queue ${queueName}`);
+      this.logger.logWithContext(this.context, `Job ${job.id} completed in queue ${queueName}`, 'info', {
+        queueName,
+        jobId: String(job.id),
+        type: 'queue-job',
+      });
     });
 
     worker.on('failed', (job, err) => {
-      this.logger.error(`Job ${job?.id} failed in queue ${queueName}:`, err);
+      this.logger.error(`Job ${job?.id} failed in queue ${queueName}`, err, {
+        context: this.context,
+        queueName,
+        jobId: job?.id ? String(job.id) : undefined,
+        type: 'queue-job',
+      });
     });
 
     worker.on('error', (err) => {
-      this.logger.error(`Worker error in queue ${queueName}:`, err);
+      this.logger.error(`Worker error in queue ${queueName}`, err, {
+        context: this.context,
+        queueName,
+        type: 'queue',
+      });
     });
 
     this.workers.set(queueName, worker);
-    this.logger.info(`Worker for queue ${queueName} created`);
+    this.logger.logWithContext(this.context, `Worker for queue ${queueName} created`, 'info', {
+      queueName,
+      type: 'queue',
+    });
 
     return worker;
   }
 
-  /**
-   * Add a job to a queue
-   */
   async addJob<T = QueueJobData>(
     queueName: string,
     jobName: string,
@@ -150,19 +170,21 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     options?: any,
   ): Promise<Job<T>> {
     const queue = this.getQueue(queueName) || this.createQueue(queueName);
-    
+
     const job = await queue.add(jobName, data, {
       delay: 0,
       ...options,
     });
 
-    this.logger.info(`Job ${job.id} added to queue ${queueName}`);
+    this.logger.logWithContext(this.context, `Job ${job.id} added to queue ${queueName}`, 'info', {
+      queueName,
+      jobName,
+      jobId: String(job.id),
+      type: 'queue-job',
+    });
     return job;
   }
 
-  /**
-   * Get job counts for a queue
-   */
   async getJobCounts(queueName: string): Promise<{
     waiting: number;
     active: number;
@@ -177,8 +199,6 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     const counts = await queue.getJobCounts();
-    
-    // Ensure all required properties are present with default values
     return {
       waiting: counts.waiting || 0,
       active: counts.active || 0,
@@ -189,9 +209,6 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /**
-   * Get queue statistics
-   */
   async getQueueStats(queueName: string): Promise<any> {
     const queue = this.getQueue(queueName);
     if (!queue) {
@@ -216,9 +233,6 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /**
-   * Pause a queue
-   */
   async pauseQueue(queueName: string): Promise<void> {
     const queue = this.getQueue(queueName);
     if (!queue) {
@@ -226,12 +240,12 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     await queue.pause();
-    this.logger.info(`Queue ${queueName} paused`);
+    this.logger.logWithContext(this.context, `Queue ${queueName} paused`, 'info', {
+      queueName,
+      type: 'queue',
+    });
   }
 
-  /**
-   * Resume a queue
-   */
   async resumeQueue(queueName: string): Promise<void> {
     const queue = this.getQueue(queueName);
     if (!queue) {
@@ -239,12 +253,12 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     await queue.resume();
-    this.logger.info(`Queue ${queueName} resumed`);
+    this.logger.logWithContext(this.context, `Queue ${queueName} resumed`, 'info', {
+      queueName,
+      type: 'queue',
+    });
   }
 
-  /**
-   * Clear a queue (remove all jobs)
-   */
   async clearQueue(queueName: string): Promise<void> {
     const queue = this.getQueue(queueName);
     if (!queue) {
@@ -252,26 +266,20 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     await queue.drain();
-    this.logger.info(`Queue ${queueName} cleared`);
+    this.logger.logWithContext(this.context, `Queue ${queueName} cleared`, 'info', {
+      queueName,
+      type: 'queue',
+    });
   }
 
-  /**
-   * Get all queue names
-   */
   getQueueNames(): string[] {
     return Array.from(this.queues.keys());
   }
 
-  /**
-   * Check if queue exists
-   */
   hasQueue(name: string): boolean {
     return this.queues.has(name);
   }
 
-  /**
-   * Check if worker exists
-   */
   hasWorker(queueName: string): boolean {
     return this.workers.has(queueName);
   }

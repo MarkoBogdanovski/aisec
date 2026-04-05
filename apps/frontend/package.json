@@ -23,6 +23,7 @@
     "v-network-graph": "^0.9.22"
   },
   "devDependencies": {
-    "@nuxtjs/storybook": "^9.0.1"
+    "@nuxtjs/storybook": "^9.0.1",
+    "jsdoc-type-pratt-parser": "^7.2.0"
   }
 }

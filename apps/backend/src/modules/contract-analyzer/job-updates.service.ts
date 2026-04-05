@@ -1,6 +1,7 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import type { Server as HttpServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
+import { LoggerService } from '../../common/logger/logger.service';
 import type { JobRealtimeEnvelope, JobResultView } from './job-updates.types';
 
 type SubscribedSocket = {
@@ -10,9 +11,11 @@ type SubscribedSocket = {
 
 @Injectable()
 export class JobUpdatesService implements OnModuleDestroy {
-  private readonly logger = new Logger(JobUpdatesService.name);
+  private readonly context = JobUpdatesService.name;
   private readonly clients = new Set<SubscribedSocket>();
   private server?: WebSocketServer;
+
+  constructor(private readonly logger: LoggerService) {}
 
   attachServer(server: HttpServer): void {
     if (this.server) {
@@ -21,7 +24,10 @@ export class JobUpdatesService implements OnModuleDestroy {
 
     this.server = new WebSocketServer({ server, path: '/ws/jobs' });
     this.server.on('connection', (socket) => this.registerClient(socket));
-    this.logger.log('WebSocket job updates available on /ws/jobs');
+    this.logger.logWithContext(this.context, 'WebSocket job updates available', 'info', {
+      path: '/ws/jobs',
+      type: 'ws',
+    });
   }
 
   onModuleDestroy(): void {
@@ -64,7 +70,10 @@ export class JobUpdatesService implements OnModuleDestroy {
     });
 
     socket.on('error', (error) => {
-      this.logger.warn(`WebSocket client error: ${error.message}`);
+      this.logger.logWithContext(this.context, 'WebSocket client error', 'warn', {
+        error: error.message,
+        type: 'ws',
+      });
       this.clients.delete(client);
     });
   }
@@ -92,7 +101,10 @@ export class JobUpdatesService implements OnModuleDestroy {
         });
       }
     } catch (error) {
-      this.logger.warn(`Invalid WebSocket payload: ${(error as Error).message}`);
+      this.logger.logWithContext(this.context, 'Invalid websocket payload', 'warn', {
+        error: (error as Error).message,
+        type: 'ws',
+      });
     }
   }
 

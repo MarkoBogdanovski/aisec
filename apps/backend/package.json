@@ -20,9 +20,11 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:push": "prisma db push",
     "prisma:reset": "prisma migrate reset",
     "prisma:studio": "prisma studio",
-    "prisma:seed": "ts-node prisma/seed.ts"
+    "prisma:seed": "ts-node prisma/seed.ts",
+    "supabase:schema:export": "prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script --output supabase/schema.sql"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.22",

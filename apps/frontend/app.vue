@@ -48,11 +48,16 @@
         <NuxtPage />
       </main>
     </div>
+    <DevConsole v-if="showDevConsole" />
   </div>
 </template>
 
 <script setup lang="ts">
+import DevConsole from '~/components/shared/DevConsole.vue';
+
 const analysisMode = useState<'contract' | 'wallet'>('analysis-mode', () => 'contract');
+const config = useRuntimeConfig();
+const showDevConsole = import.meta.dev && config.public.enableDevConsole;
 
 const toggleAnalysisMode = () => {
   analysisMode.value = analysisMode.value === 'contract' ? 'wallet' : 'contract';

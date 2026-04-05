@@ -3,6 +3,7 @@ import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
+import { DevConsoleService } from './common/logger/dev-console.service';
 import { JobUpdatesService } from './modules/contract-analyzer/job-updates.service';
 
 function getAllowedOrigins(): string[] {
@@ -64,6 +65,7 @@ async function bootstrap() {
   }
 
   app.get(JobUpdatesService).attachServer(app.getHttpServer());
+  app.get(DevConsoleService).attachServer(app.getHttpServer());
 
   const port = process.env.PORT || 3000;
   await app.listen(port);

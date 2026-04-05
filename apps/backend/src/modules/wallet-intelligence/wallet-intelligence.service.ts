@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Network, RiskLevel } from '@prisma/client';
 import { ethers } from 'ethers';
 import { PrismaService } from '../../common/database/prisma.service';
-import { chainIdFromNetwork, networkFromChainId } from '../../common/web3/chain-mapping';
+import { LoggerService } from '../../common/logger/logger.service';
+import { networkFromChainId } from '../../common/web3/chain-mapping';
 import { AnalysisStatus } from '../../enums/analysis-status.enum';
 
 const TRANSFER_EVENT_TOPIC = ethers.id('Transfer(address,address,uint256)');
@@ -29,7 +30,7 @@ type WalletProfileResult = {
 
 @Injectable()
 export class WalletIntelligenceService {
-  private readonly logger = new Logger(WalletIntelligenceService.name);
+  private readonly context = WalletIntelligenceService.name;
   private readonly rpcUrls: Record<Network, string> = {
     [Network.ETHEREUM]: process.env.ETHEREUM_RPC_URL || 'https://mainnet.infura.io/v3/YOUR_PROJECT_ID',
     [Network.POLYGON]: process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',
@@ -41,12 +42,22 @@ export class WalletIntelligenceService {
     [Network.BASE]: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
   };
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly logger: LoggerService,
+  ) {}
 
   async profileWallet(chainId: string, walletAddress: string): Promise<WalletProfileResult> {
+    const startedAt = Date.now();
     const checksumAddress = ethers.getAddress(walletAddress.trim());
     const network = networkFromChainId(chainId);
     const provider = new ethers.JsonRpcProvider(this.getRpcUrl(network));
+
+    this.logger.logWithContext(this.context, 'Starting wallet intelligence profiling', 'info', {
+      chainId,
+      walletAddress: checksumAddress,
+      type: 'wallet-profile',
+    });
 
     const [balance, nonce, code, latestBlock] = await Promise.all([
       provider.getBalance(checksumAddress),
@@ -102,6 +113,13 @@ export class WalletIntelligenceService {
       },
     });
 
+    this.logger.logPerformance('wallet-profile', Date.now() - startedAt, {
+      context: this.context,
+      chainId,
+      walletAddress: checksumAddress,
+      score,
+    });
+
     return {
       status: AnalysisStatus.COMPLETED,
       chain_id: chainId,
@@ -149,7 +167,10 @@ export class WalletIntelligenceService {
       });
       return logs.length;
     } catch (error) {
-      this.logger.debug(`Transfer log lookup failed: ${(error as Error).message}`);
+      this.logger.logWithContext(this.context, 'Transfer log lookup failed', 'debug', {
+        error: (error as Error).message,
+        type: 'wallet-profile',
+      });
       return 0;
     }
   }

@@ -81,6 +81,24 @@ export interface JobRealtimeEnvelope {
   data: Record<string, unknown>;
 }
 
+export interface DevLogEntry {
+  id: string;
+  timestamp: string;
+  level: 'debug' | 'info' | 'warn' | 'error';
+  message: string;
+  context?: string;
+  type?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface DevConsoleEnvelope {
+  event: 'connection.ready' | 'log.entry';
+  data: {
+    path?: string;
+    recent?: DevLogEntry[];
+  } | DevLogEntry;
+}
+
 export interface ContractHistoryResponse {
   contract_address: string;
   chain_id: string;

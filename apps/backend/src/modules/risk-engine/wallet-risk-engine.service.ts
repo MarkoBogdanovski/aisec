@@ -1,89 +1,80 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// src/modules/risk-engine/wallet-risk-engine.service.ts
-//
-// MAIN ORCHESTRATOR — 5-Stage Pipeline
-//
-// Stage 1: Feature Extraction   (caller provides WalletFeatures)
-// Stage 2: Archetype Detection  (WalletClassifierService)
-// Stage 3: Factor Computation   (RiskFactorService)
-// Stage 4: Confidence Scoring   (ConfidenceScorerService)
-// Stage 5: Final Classification (FinalClassifierService)
-//
-// This service is the single entry point for all wallet risk scoring.
-// It is stateless — every call is independent.
-// ─────────────────────────────────────────────────────────────────────────────
-
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { LoggerService } from '../../common/logger/logger.service';
 import {
   DEFAULT_SCORING_CONFIG,
   ScoringConfig,
   WalletFeatures,
   WalletRiskResult,
 } from './types/risk-engine.types';
-import { WalletClassifierService }  from './stages/wallet-classifier.service';
-import { RiskFactorService }        from './stages/risk-factor.service';
-import { ConfidenceScorerService }  from './stages/confidence-scorer.service';
-import { FinalClassifierService }   from './stages/final-classifier.service';
+import { WalletClassifierService } from './stages/wallet-classifier.service';
+import { RiskFactorService } from './stages/risk-factor.service';
+import { ConfidenceScorerService } from './stages/confidence-scorer.service';
+import { FinalClassifierService } from './stages/final-classifier.service';
 
 const ENGINE_VERSION = '2.0.0';
 
 @Injectable()
 export class WalletRiskEngineService {
-  private readonly logger = new Logger(WalletRiskEngineService.name);
+  private readonly context = WalletRiskEngineService.name;
 
   constructor(
-    private readonly classifier:        WalletClassifierService,
-    private readonly factorService:     RiskFactorService,
-    private readonly confidenceScorer:  ConfidenceScorerService,
-    private readonly finalClassifier:   FinalClassifierService,
+    private readonly classifier: WalletClassifierService,
+    private readonly factorService: RiskFactorService,
+    private readonly confidenceScorer: ConfidenceScorerService,
+    private readonly finalClassifier: FinalClassifierService,
+    private readonly logger: LoggerService,
   ) {}
 
-  /**
-   * Inject a non-default scoring configuration.
-   * Useful for A/B testing or per-network config.
-   */
   configure(config: ScoringConfig): void {
     this.factorService.setConfig(config);
     this.finalClassifier.setConfig(config);
+    this.logger.logWithContext(this.context, 'Scoring configuration updated', 'info', {
+      type: 'risk-engine',
+    });
   }
 
-  /**
-   * Run the full 5-stage risk scoring pipeline.
-   *
-   * @param features - pre-extracted wallet features (Stage 1 output)
-   * @returns complete risk result with score, confidence, classification, factors
-   */
   async score(features: WalletFeatures): Promise<WalletRiskResult> {
     const startTime = Date.now();
     const dataPoints: number[] = [];
 
-    this.logger.debug(
-      `[RiskEngine] Scoring wallet ${features.address} on chain ${features.chainId}`,
-    );
+    this.logger.logWithContext(this.context, 'Scoring wallet', 'debug', {
+      address: features.address,
+      chainId: features.chainId,
+      type: 'risk-engine',
+    });
 
     try {
-      // ── Stage 2: Archetype Detection ─────────────────────────────────────
       const archetypeResult = this.classifier.classify(features);
-      this.logger.debug(
-        `[Stage 2] Archetype: ${archetypeResult.archetype} ` +
-        `(confidence: ${archetypeResult.confidence.toFixed(2)})`,
-      );
+      this.logger.logWithContext(this.context, 'Stage 2 archetype classified', 'debug', {
+        address: features.address,
+        archetype: archetypeResult.archetype,
+        confidence: archetypeResult.confidence,
+        type: 'risk-engine',
+      });
       dataPoints.push(features.txCount, features.uniqueCounterparties);
 
-      // ── Stage 3: Risk Factor Computation ─────────────────────────────────
       const factors = this.factorService.computeFactors(features, archetypeResult);
-      this.logger.debug(`[Stage 3] Computed ${factors.length} factors`);
+      this.logger.logWithContext(this.context, 'Stage 3 risk factors computed', 'debug', {
+        address: features.address,
+        factorCount: factors.length,
+        type: 'risk-engine',
+      });
       dataPoints.push(factors.length);
 
-      // ── Stage 4: Confidence Scoring ───────────────────────────────────────
       const confidenceResult = this.confidenceScorer.compute(features, archetypeResult);
-      this.logger.debug(`[Stage 4] Confidence: ${confidenceResult.score.toFixed(2)}`);
+      this.logger.logWithContext(this.context, 'Stage 4 confidence scored', 'debug', {
+        address: features.address,
+        confidence: confidenceResult.score,
+        type: 'risk-engine',
+      });
 
-      // ── Stage 5a: Risk Score Aggregation ──────────────────────────────────
       const riskScore = this.finalClassifier.computeRiskScore(factors);
-      this.logger.debug(`[Stage 5a] Risk score: ${riskScore}`);
+      this.logger.logWithContext(this.context, 'Stage 5a risk score aggregated', 'debug', {
+        address: features.address,
+        riskScore,
+        type: 'risk-engine',
+      });
 
-      // ── Stage 5b: Final Classification ────────────────────────────────────
       const { classification, reasoning } = this.finalClassifier.classify(
         riskScore,
         confidenceResult,
@@ -91,54 +82,57 @@ export class WalletRiskEngineService {
         factors,
         features,
       );
-      this.logger.debug(`[Stage 5b] Classification: ${classification} — ${reasoning[0]}`);
+      this.logger.logWithContext(this.context, 'Stage 5b final classification complete', 'debug', {
+        address: features.address,
+        classification,
+        reason: reasoning[0],
+        type: 'risk-engine',
+      });
 
       const durationMs = Date.now() - startTime;
-
       const result: WalletRiskResult = {
-        address:          features.address,
-        chainId:          features.chainId,
-        risk_score:       riskScore,
+        address: features.address,
+        chainId: features.chainId,
+        risk_score: riskScore,
         confidence_score: confidenceResult.score,
         classification,
-        archetype:        archetypeResult.archetype,
+        archetype: archetypeResult.archetype,
         factors,
         meta: {
-          analyzedAt:  new Date().toISOString(),
-          version:     ENGINE_VERSION,
+          analyzedAt: new Date().toISOString(),
+          version: ENGINE_VERSION,
           durationMs,
-          dataPoints:  dataPoints.reduce((sum, n) => sum + n, 0),
+          dataPoints: dataPoints.reduce((sum, n) => sum + n, 0),
         },
       };
 
-      this.logger.log(
-        `[RiskEngine] ${features.address} → ${classification} ` +
-        `score=${riskScore} conf=${confidenceResult.score.toFixed(2)} ` +
-        `arch=${archetypeResult.archetype} (${durationMs}ms)`,
-      );
+      this.logger.logPerformance('wallet-risk-score', durationMs, {
+        context: this.context,
+        address: features.address,
+        chainId: features.chainId,
+        riskScore,
+        classification,
+      });
 
       return result;
-
     } catch (error) {
-      this.logger.error(
-        `[RiskEngine] Pipeline failed for ${features.address}: ${(error as Error).message}`,
-        (error as Error).stack,
-      );
-      // Safe fallback — never crash callers, return UNKNOWN with explanation
+      this.logger.error(`Risk engine pipeline failed for ${features.address}`, error, {
+        context: this.context,
+        address: features.address,
+        chainId: features.chainId,
+        type: 'risk-engine',
+      });
       return this.unknownFallback(features, startTime, (error as Error).message);
     }
   }
 
-  /**
-   * Score multiple wallets in parallel.
-   * Errors in individual wallets do not abort the batch.
-   */
   async scoreBatch(featuresArray: WalletFeatures[]): Promise<WalletRiskResult[]> {
-    this.logger.log(`[RiskEngine] Batch scoring ${featuresArray.length} wallets`);
-    return Promise.all(featuresArray.map(f => this.score(f)));
+    this.logger.logWithContext(this.context, 'Batch scoring wallets', 'info', {
+      walletCount: featuresArray.length,
+      type: 'risk-engine',
+    });
+    return Promise.all(featuresArray.map((f) => this.score(f)));
   }
-
-  // ── Private helpers ───────────────────────────────────────────────────────
 
   private unknownFallback(
     features: WalletFeatures,
@@ -146,27 +140,27 @@ export class WalletRiskEngineService {
     errorMessage: string,
   ): WalletRiskResult {
     const { UNKNOWN: unkClass } = require('./types/risk-engine.types').RiskClassification;
-    const { UNKNOWN: unkArch }  = require('./types/risk-engine.types').WalletArchetype;
-    const { TRUST }             = require('./types/risk-engine.types').FactorType;
+    const { UNKNOWN: unkArch } = require('./types/risk-engine.types').WalletArchetype;
+    const { TRUST } = require('./types/risk-engine.types').FactorType;
 
     return {
-      address:          features.address,
-      chainId:          features.chainId,
-      risk_score:       0,
+      address: features.address,
+      chainId: features.chainId,
+      risk_score: 0,
       confidence_score: 0,
-      classification:   unkClass,
-      archetype:        unkArch,
+      classification: unkClass,
+      archetype: unkArch,
       factors: [{
-        name:        'PIPELINE_ERROR',
-        impact:      0,
-        type:        TRUST,
+        name: 'PIPELINE_ERROR',
+        impact: 0,
+        type: TRUST,
         description: `Risk scoring pipeline encountered an error: ${errorMessage}`,
-        weight:      0,
-        confidence:  0,
+        weight: 0,
+        confidence: 0,
       }],
       meta: {
         analyzedAt: new Date().toISOString(),
-        version:    ENGINE_VERSION,
+        version: ENGINE_VERSION,
         durationMs: Date.now() - startTime,
         dataPoints: 0,
       },

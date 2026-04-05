@@ -18,7 +18,7 @@
 //   3. KNOWN_SAFE_CONTRACTS    — allowlist short-circuit (unchanged).
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ethers } from 'ethers';
 import {
   ContractType,
@@ -28,6 +28,7 @@ import {
 } from '@prisma/client';
 import { QueueService }     from '../../queues/queue.service';
 import { QUEUE_CONTRACT_ANALYZE } from '../../queues/queue.constants';
+import { LoggerService }    from '../../common/logger/logger.service';
 import { PrismaService }    from '../../common/database/prisma.service';
 import { RedisService }     from '../../common/redis/redis.service';
 import { chainIdFromNetwork, networkFromChainId } from '../../common/web3/chain-mapping';
@@ -227,7 +228,7 @@ function normalizeTokenDecimals(value: bigint | number | null | undefined): numb
 
 @Injectable()
 export class ContractAnalyzerService {
-  private readonly logger = new Logger(ContractAnalyzerService.name);
+  private readonly context = ContractAnalyzerService.name;
 
   private readonly rpcUrls: Record<NetworkEnum, string> = {
     [NetworkEnum.ETHEREUM]:  process.env.ETHEREUM_RPC_URL  || 'https://mainnet.infura.io/v3/YOUR_PROJECT_ID',
@@ -254,6 +255,7 @@ export class ContractAnalyzerService {
 
   constructor(
     private readonly queueService: QueueService,
+    private readonly logger:       LoggerService,
     private readonly prisma:       PrismaService,
     private readonly redis:        RedisService,
     // ── Risk engine: @Optional() so unit tests don't need to mock it ─────
@@ -368,7 +370,10 @@ export class ContractAnalyzerService {
 
     // ── Known-safe short circuit ────────────────────────────────────────────
     if (this.KNOWN_SAFE_CONTRACTS.has(checksumAddress)) {
-      this.logger.debug(`Known-safe allowlist hit: ${checksumAddress}`);
+      this.logger.logWithContext(this.context, 'Known-safe allowlist hit', 'debug', {
+        contractAddress: checksumAddress,
+        type: 'contract-analysis',
+      });
       return {
         status:    'completed',
         score:     0,
@@ -385,7 +390,11 @@ export class ContractAnalyzerService {
     const networkEnum = jobDto.network ?? NetworkEnum.ETHEREUM;
     const chainId     = jobDto.chainId ?? chainIdFromNetwork(networkEnum as unknown as PrismaNetwork);
 
-    this.logger.log(`Starting contract analysis chain=${chainId} addr=${checksumAddress}`);
+    this.logger.logWithContext(this.context, 'Starting contract analysis', 'info', {
+      chainId,
+      contractAddress: checksumAddress,
+      type: 'contract-analysis',
+    });
 
     try {
       // ── Cache management ──────────────────────────────────────────────────
@@ -397,7 +406,11 @@ export class ContractAnalyzerService {
         const cached = await this.redis.get(this.cacheKey(chainId, checksumAddress));
         if (cached) {
           try {
-            this.logger.debug(`Cache hit for ${chainId}:${checksumAddress}`);
+            this.logger.logWithContext(this.context, 'Contract analysis cache hit', 'debug', {
+              chainId,
+              contractAddress: checksumAddress,
+              type: 'contract-analysis',
+            });
             return {
               status:           'completed',
               ...JSON.parse(cached),
@@ -412,7 +425,11 @@ export class ContractAnalyzerService {
           where: { chainId_address: { chainId, address: checksumAddress } },
         });
         if (existing) {
-          this.logger.log(`Contract ${checksumAddress} already analyzed, skipping`);
+          this.logger.logWithContext(this.context, 'Contract already analyzed, skipping', 'info', {
+            chainId,
+            contractAddress: checksumAddress,
+            type: 'contract-analysis',
+          });
           return {
             status:           'skipped',
             name:             existing.name ?? undefined,
@@ -602,11 +619,14 @@ export class ContractAnalyzerService {
       );
 
       const duration = Date.now() - startTime;
-      this.logger.log(
-        `Contract analysis completed in ${duration}ms for ${checksumAddress} ` +
-        `score=${score} severity=${bucket}` +
-        (deployerRiskResult ? ` deployer=${deployerRiskResult.classification}` : ''),
-      );
+      this.logger.logPerformance('contract-analysis', duration, {
+        context: this.context,
+        chainId,
+        contractAddress: checksumAddress,
+        score,
+        severity: bucket,
+        deployerClassification: deployerRiskResult?.classification ?? null,
+      });
 
       return {
         status:          'completed',
@@ -625,10 +645,12 @@ export class ContractAnalyzerService {
 
     } catch (error) {
       const duration = Date.now() - startTime;
-      this.logger.error(
-        `Contract analysis failed for ${checksumAddress}: ${(error as Error).message}`,
-        (error as Error).stack,
-      );
+      this.logger.error(`Contract analysis failed for ${checksumAddress}`, error, {
+        context: this.context,
+        chainId,
+        contractAddress: checksumAddress,
+        type: 'contract-analysis',
+      });
       return {
         status:           'failed',
         error:            (error as Error).message,
