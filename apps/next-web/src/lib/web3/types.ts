@@ -1,0 +1,10 @@
+export enum Network {
+  ETHEREUM = "ETHEREUM",
+  POLYGON = "POLYGON",
+  BSC = "BSC",
+  ARBITRUM = "ARBITRUM",
+  OPTIMISM = "OPTIMISM",
+  AVALANCHE = "AVALANCHE",
+  FANTOM = "FANTOM",
+  BASE = "BASE",
+}

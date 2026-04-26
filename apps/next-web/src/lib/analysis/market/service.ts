@@ -1,13 +1,12 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { Network } from '@prisma/client';
-import { ethers } from 'ethers';
-import { LoggerService } from '../../common/logger/logger.service';
-import { networkFromChainId } from '../../common/web3/chain-mapping';
+import { ServiceUnavailableError } from "@/lib/http/errors";
+import { logger } from "@/lib/logger/server-logger";
+import { ethers } from "ethers";
 import {
   MarketAnalysisSource,
   MarketConnectionDirection,
   MarketSignalSeverity,
-} from '../../enums/market.enum';
+} from "../shared";
+import { networkFromChainId } from "@/lib/web3/chain-mapping";
 
 type CryptoApisChain = {
   blockchain: string;
@@ -78,14 +77,11 @@ export type TokenMarketAnalysis = {
   wallet_connection: WalletConnection | null;
 };
 
-@Injectable()
-export class MarketService {
-  private readonly context = MarketService.name;
-  private readonly baseUrl = process.env.CRYPTOAPIS_BASE_URL || 'https://rest.cryptoapis.io';
-  private readonly apiKey = process.env.CRYPTOAPIS_API_KEY || '';
+export class MarketAnalysisService {
+  private readonly context = MarketAnalysisService.name;
+  private readonly baseUrl = process.env.CRYPTOAPIS_BASE_URL || "https://rest.cryptoapis.io";
+  private readonly apiKey = process.env.CRYPTOAPIS_API_KEY || "";
   private readonly requestTimeoutMs = 15000;
-
-  constructor(private readonly logger: LoggerService) {}
 
   async analyzeTokenActivity(
     chainId: string,
@@ -94,18 +90,18 @@ export class MarketService {
   ): Promise<TokenMarketAnalysis> {
     const startedAt = Date.now();
     if (!this.apiKey) {
-      throw new ServiceUnavailableException('CRYPTOAPIS_API_KEY is not configured');
+      throw new ServiceUnavailableError("CRYPTOAPIS_API_KEY is not configured");
     }
 
     const checksummedToken = ethers.getAddress(tokenAddress.trim());
     const checksummedWallet = walletAddress ? ethers.getAddress(walletAddress.trim()) : undefined;
     const chain = this.toCryptoApisChain(chainId);
 
-    this.logger.logWithContext(this.context, 'Starting market token analysis', 'info', {
+    logger.logWithContext(this.context, "Starting market token analysis", "info", {
       chainId,
       tokenAddress: checksummedToken,
       walletAddress: checksummedWallet,
-      type: 'market-analysis',
+      type: "market-analysis",
     });
 
     const tokenDetails = await this.requestJson(
@@ -132,10 +128,10 @@ export class MarketService {
 
     const analysisSignals = this.buildSignals({
       latestPrice: this.asString(assetItem.latestRate?.amount),
-      volume24h: this.asString(specificData['24HoursTradingVolume']),
+      volume24h: this.asString(specificData["24HoursTradingVolume"]),
       marketCap: this.asString(specificData.marketCapInUSD),
-      priceChange24h: this.asString(specificData['24HoursPriceChangeInPercentage']),
-      priceChange1h: this.asString(specificData['1HourPriceChangeInPercentage']),
+      priceChange24h: this.asString(specificData["24HoursPriceChangeInPercentage"]),
+      priceChange1h: this.asString(specificData["1HourPriceChangeInPercentage"]),
       latestTransactionAt: this.toIso(txItems[0]?.timestamp),
       recentTransactionCount: txItems.length,
     });
@@ -161,9 +157,9 @@ export class MarketService {
         latest_price: this.asString(assetItem.latestRate?.amount),
         price_unit: this.asString(assetItem.latestRate?.unit),
         market_cap_usd: this.asString(specificData.marketCapInUSD),
-        volume_24h: this.asString(specificData['24HoursTradingVolume']),
-        price_change_24h: this.asString(specificData['24HoursPriceChangeInPercentage']),
-        price_change_1h: this.asString(specificData['1HourPriceChangeInPercentage']),
+        volume_24h: this.asString(specificData["24HoursTradingVolume"]),
+        price_change_24h: this.asString(specificData["24HoursPriceChangeInPercentage"]),
+        price_change_1h: this.asString(specificData["1HourPriceChangeInPercentage"]),
         asset_reference_id: this.asString(assetItem.referenceId),
         asset_slug: this.asString(assetItem.slug),
       },
@@ -186,60 +182,67 @@ export class MarketService {
       wallet_connection: walletConnection,
     };
 
-    this.logger.logPerformance('market-token-analysis', Date.now() - startedAt, {
+    logger.logPerformance("market-token-analysis", Date.now() - startedAt, {
       context: this.context,
       chainId,
       tokenAddress: checksummedToken,
       signalCount: analysisSignals.length,
     });
+
     return result;
   }
 
-  private async requestJson(path: string): Promise<any> {
+  private async requestJson(path: string) {
     const response = await fetch(`${this.baseUrl}${path}`, {
       headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': this.apiKey,
+        "Content-Type": "application/json",
+        "X-API-Key": this.apiKey,
       },
+      cache: "no-store",
       signal: AbortSignal.timeout(this.requestTimeoutMs),
     });
 
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
       const message = payload?.error?.message || `Crypto APIs request failed with status ${response.status}`;
-      throw new ServiceUnavailableException(message);
+      throw new ServiceUnavailableError(message);
     }
 
     return payload;
   }
 
-  private async tryRequestJson(path: string): Promise<any | null> {
+  private async tryRequestJson(path: string) {
     try {
       return await this.requestJson(path);
     } catch (error) {
-      this.logger.logWithContext(this.context, 'Crypto APIs request failed', 'warn', {
+      logger.logWithContext(this.context, "Crypto APIs request failed", "warn", {
         path,
         error: (error as Error).message,
-        type: 'market-api',
+        type: "market-analysis",
       });
       return null;
     }
   }
 
   private toCryptoApisChain(chainId: string): CryptoApisChain {
-    const network = networkFromChainId(chainId);
-    const mapping: Record<Network, CryptoApisChain> = {
-      [Network.ETHEREUM]: { blockchain: 'ethereum', network: 'mainnet' },
-      [Network.POLYGON]: { blockchain: 'polygon', network: 'mainnet' },
-      [Network.BSC]: { blockchain: 'binance-smart-chain', network: 'mainnet' },
-      [Network.ARBITRUM]: { blockchain: 'arbitrum', network: 'mainnet' },
-      [Network.OPTIMISM]: { blockchain: 'optimism', network: 'mainnet' },
-      [Network.AVALANCHE]: { blockchain: 'avalanche', network: 'mainnet' },
-      [Network.FANTOM]: { blockchain: 'fantom', network: 'mainnet' },
-      [Network.BASE]: { blockchain: 'base', network: 'mainnet' },
-    };
-
-    return mapping[network] ?? mapping[Network.ETHEREUM];
+    switch (networkFromChainId(chainId)) {
+      case "POLYGON":
+        return { blockchain: "polygon", network: "mainnet" };
+      case "BSC":
+        return { blockchain: "binance-smart-chain", network: "mainnet" };
+      case "ARBITRUM":
+        return { blockchain: "arbitrum", network: "mainnet" };
+      case "OPTIMISM":
+        return { blockchain: "optimism", network: "mainnet" };
+      case "AVALANCHE":
+        return { blockchain: "avalanche", network: "mainnet" };
+      case "FANTOM":
+        return { blockchain: "fantom", network: "mainnet" };
+      case "BASE":
+        return { blockchain: "base", network: "mainnet" };
+      default:
+        return { blockchain: "ethereum", network: "mainnet" };
+    }
   }
 
   private buildSignals(input: {
@@ -259,68 +262,68 @@ export class MarketService {
 
     if (!input.latestPrice) {
       signals.push({
-        type: 'PRICE_COVERAGE_GAP',
+        type: "PRICE_COVERAGE_GAP",
         severity: MarketSignalSeverity.MEDIUM,
-        description: 'Crypto APIs did not return a latest price for this token symbol.',
+        description: "Crypto APIs did not return a latest price for this token symbol.",
         value: null,
       });
     }
 
     if (absChange24h >= 20) {
       signals.push({
-        type: 'HIGH_24H_VOLATILITY',
+        type: "HIGH_24H_VOLATILITY",
         severity: MarketSignalSeverity.HIGH,
-        description: 'Token price moved sharply over the last 24 hours.',
+        description: "Token price moved sharply over the last 24 hours.",
         value: input.priceChange24h,
       });
     } else if (absChange24h >= 10) {
       signals.push({
-        type: 'MODERATE_24H_VOLATILITY',
+        type: "MODERATE_24H_VOLATILITY",
         severity: MarketSignalSeverity.MEDIUM,
-        description: 'Token price shows elevated 24h volatility.',
+        description: "Token price shows elevated 24h volatility.",
         value: input.priceChange24h,
       });
     }
 
     if (absChange1h >= 5) {
       signals.push({
-        type: 'SHORT_TERM_PRICE_SWING',
+        type: "SHORT_TERM_PRICE_SWING",
         severity: MarketSignalSeverity.MEDIUM,
-        description: 'Token price moved materially in the last hour.',
+        description: "Token price moved materially in the last hour.",
         value: input.priceChange1h,
       });
     }
 
     if (volume24h > 0 && marketCap > 0 && volume24h / marketCap > 1) {
       signals.push({
-        type: 'UNUSUAL_VOLUME_TO_MARKET_CAP',
+        type: "UNUSUAL_VOLUME_TO_MARKET_CAP",
         severity: MarketSignalSeverity.HIGH,
-        description: '24h trading volume exceeds market cap, which can indicate abnormal churn.',
+        description: "24h trading volume exceeds market cap, which can indicate abnormal churn.",
         value: `${volume24h}/${marketCap}`,
       });
     } else if (volume24h === 0) {
       signals.push({
-        type: 'LOW_LIQUIDITY_SIGNAL',
+        type: "LOW_LIQUIDITY_SIGNAL",
         severity: MarketSignalSeverity.MEDIUM,
-        description: 'No 24h trading volume was returned for this token.',
+        description: "No 24h trading volume was returned for this token.",
         value: input.volume24h,
       });
     }
 
     if (marketCap > 0 && marketCap < 1_000_000) {
       signals.push({
-        type: 'MICROCAP_EXPOSURE',
+        type: "MICROCAP_EXPOSURE",
         severity: MarketSignalSeverity.MEDIUM,
-        description: 'Token market cap is below 1M USD.',
+        description: "Token market cap is below 1M USD.",
         value: input.marketCap,
       });
     }
 
     if (!input.latestTransactionAt || input.recentTransactionCount === 0) {
       signals.push({
-        type: 'LOW_ONCHAIN_ACTIVITY',
+        type: "LOW_ONCHAIN_ACTIVITY",
         severity: MarketSignalSeverity.LOW,
-        description: 'No recent contract-level transactions were observed in the sampled window.',
+        description: "No recent contract-level transactions were observed in the sampled window.",
         observedAt: input.latestTransactionAt,
       });
     }
@@ -328,39 +331,34 @@ export class MarketService {
     return signals;
   }
 
-  private buildWalletConnection(
-    tokenAddress: string,
-    walletAddress: string,
-    items: any[] | undefined,
-  ): WalletConnection {
+  private buildWalletConnection(tokenAddress: string, walletAddress: string, items: any[] | undefined): WalletConnection {
     const normalizedToken = tokenAddress.toLowerCase();
-    const rows = Array.isArray(items)
+    const relevant = Array.isArray(items)
       ? items.filter(
-          (item) =>
-            String(item?.tokenData?.contractAddress || item?.contractAddress || '').toLowerCase() === normalizedToken,
+          (item) => String(item?.tokenData?.contractAddress || item?.contractAddress || "").toLowerCase() === normalizedToken,
         )
       : [];
 
-    const inbound = rows.some(
-      (item) => String(item?.recipient || '').toLowerCase() === walletAddress.toLowerCase(),
+    const inbound = relevant.some(
+      (item) => String(item?.recipient || "").toLowerCase() === walletAddress.toLowerCase(),
     );
-    const outbound = rows.some(
-      (item) => String(item?.sender || '').toLowerCase() === walletAddress.toLowerCase(),
+    const outbound = relevant.some(
+      (item) => String(item?.sender || "").toLowerCase() === walletAddress.toLowerCase(),
     );
 
-    let direction: WalletConnection['direction'] = MarketConnectionDirection.NONE;
+    let direction: WalletConnection["direction"] = MarketConnectionDirection.NONE;
     if (inbound && outbound) direction = MarketConnectionDirection.BIDIRECTIONAL;
     else if (inbound) direction = MarketConnectionDirection.INBOUND;
     else if (outbound) direction = MarketConnectionDirection.OUTBOUND;
 
     return {
       wallet_address: walletAddress,
-      connected: rows.length > 0,
-      recent_transfer_count: rows.length,
+      connected: relevant.length > 0,
+      recent_transfer_count: relevant.length,
       direction,
-      last_transfer_at: this.toIso(rows[0]?.timestamp),
-      sample_transfers: rows.slice(0, 5).map((item) => ({
-        transaction_hash: this.asString(item?.transactionHash),
+      last_transfer_at: this.toIso(relevant[0]?.timestamp),
+      sample_transfers: relevant.slice(0, 5).map((item) => ({
+        transaction_hash: this.asString(item?.transactionHash || item?.transactionId),
         sender: this.asString(item?.sender),
         recipient: this.asString(item?.recipient),
         amount: this.asString(item?.tokenData?.fungibleValues?.amount),
@@ -369,7 +367,7 @@ export class MarketService {
     };
   }
 
-  private computeScore(signals: MarketSignal[]): number {
+  private computeScore(signals: MarketSignal[]) {
     if (!signals.length) {
       return 12;
     }
@@ -384,7 +382,7 @@ export class MarketService {
     return Math.min(100, total);
   }
 
-  private severityFromScore(score: number): MarketSignalSeverity {
+  private severityFromScore(score: number) {
     if (score >= 80) return MarketSignalSeverity.CRITICAL;
     if (score >= 55) return MarketSignalSeverity.HIGH;
     if (score >= 25) return MarketSignalSeverity.MEDIUM;
@@ -392,34 +390,30 @@ export class MarketService {
   }
 
   private asString(value: unknown): string | null {
-    if (typeof value === 'string' && value.length > 0) {
-      return value;
-    }
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return String(value);
-    }
+    if (typeof value === "string" && value.length > 0) return value;
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
     return null;
   }
 
   private asNumber(value: unknown): number | null {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-    if (typeof value === 'string' && value.trim().length > 0) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim() !== "") {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : null;
     }
     return null;
   }
 
-  private toIso(timestamp: unknown): string | null {
-    if (typeof timestamp === 'number' && Number.isFinite(timestamp)) {
-      return new Date(timestamp * 1000).toISOString();
+  private toIso(value: unknown): string | null {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return new Date(value * 1000).toISOString();
     }
-    if (typeof timestamp === 'string' && timestamp.trim().length > 0) {
-      const parsed = new Date(timestamp);
-      return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+    if (typeof value === "string" && value.trim().length > 0) {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date.toISOString();
     }
     return null;
   }
 }
+
+export const marketAnalysisService = new MarketAnalysisService();

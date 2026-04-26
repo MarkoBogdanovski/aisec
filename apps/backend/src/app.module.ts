@@ -15,6 +15,8 @@ import { IncidentsModule } from './modules/incidents/incidents.module';
 import { MarketModule } from './modules/market/market.module';
 import { WalletIntelligenceModule } from './modules/wallet-intelligence/wallet-intelligence.module';
 import { InvestigationsModule } from './modules/investigations/investigations.module';
+import { ChainIntelligenceModule } from './modules/chain-intelligence/chain-intelligence.module';
+import { HealthService } from './common/health/health.service';
 
 @Module({
   imports: [
@@ -45,8 +47,9 @@ import { InvestigationsModule } from './modules/investigations/investigations.mo
     MarketModule,
     WalletIntelligenceModule,
     InvestigationsModule,
+    ChainIntelligenceModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, HealthService],
 })
 export class AppModule {}

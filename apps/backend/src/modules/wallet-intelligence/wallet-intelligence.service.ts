@@ -32,7 +32,7 @@ type WalletProfileResult = {
 export class WalletIntelligenceService {
   private readonly context = WalletIntelligenceService.name;
   private readonly rpcUrls: Record<Network, string> = {
-    [Network.ETHEREUM]: process.env.ETHEREUM_RPC_URL || 'https://mainnet.infura.io/v3/YOUR_PROJECT_ID',
+    [Network.ETHEREUM]: process.env.ETHEREUM_RPC_URL || 'https://eth.llamarpc.com',
     [Network.POLYGON]: process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',
     [Network.BSC]: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org',
     [Network.ARBITRUM]: process.env.ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc',
@@ -82,20 +82,6 @@ export class WalletIntelligenceService {
     const riskLevel = this.toRiskLevel(score);
     const recentActivityBlock = recentTokenTransfers > 0 ? latestBlock : undefined;
 
-    const wallet = await this.prisma.wallet.upsert({
-      where: { chainId_address: { chainId, address: checksumAddress } },
-      create: {
-        chainId,
-        address: checksumAddress,
-        isContract,
-        riskLevel,
-      },
-      update: {
-        isContract,
-        riskLevel,
-      },
-    });
-
     const subScores = this.buildSubScores({
       isContract,
       balance,
@@ -103,14 +89,13 @@ export class WalletIntelligenceService {
       recentTokenTransfers,
     });
 
-    await this.prisma.walletReputationScore.create({
-      data: {
-        walletId: wallet.id,
-        score,
-        mixerProximity: 0,
-        sanctionFlag: false,
-        subScores,
-      },
+    await this.persistProfile({
+      chainId,
+      checksumAddress,
+      isContract,
+      riskLevel,
+      score,
+      subScores,
     });
 
     this.logger.logPerformance('wallet-profile', Date.now() - startedAt, {
@@ -142,10 +127,52 @@ export class WalletIntelligenceService {
 
   private getRpcUrl(network: Network): string {
     const configured = this.rpcUrls[network];
-    if (configured && !configured.includes('YOUR_')) {
+    if (configured && !configured.includes('YOUR_PROJECT_ID')) {
       return configured;
     }
     return this.rpcUrls[Network[network] ? network : Network.ETHEREUM] || this.rpcUrls[Network.ETHEREUM];
+  }
+
+  private async persistProfile(input: {
+    chainId: string;
+    checksumAddress: string;
+    isContract: boolean;
+    riskLevel: RiskLevel;
+    score: number;
+    subScores: Record<string, number>;
+  }): Promise<void> {
+    try {
+      const wallet = await this.prisma.wallet.upsert({
+        where: { chainId_address: { chainId: input.chainId, address: input.checksumAddress } },
+        create: {
+          chainId: input.chainId,
+          address: input.checksumAddress,
+          isContract: input.isContract,
+          riskLevel: input.riskLevel,
+        },
+        update: {
+          isContract: input.isContract,
+          riskLevel: input.riskLevel,
+        },
+      });
+
+      await this.prisma.walletReputationScore.create({
+        data: {
+          walletId: wallet.id,
+          score: input.score,
+          mixerProximity: 0,
+          sanctionFlag: false,
+          subScores: input.subScores,
+        },
+      });
+    } catch (error) {
+      this.logger.logWithContext(this.context, 'Wallet profile persistence failed; returning live analysis anyway', 'warn', {
+        walletAddress: input.checksumAddress,
+        chainId: input.chainId,
+        error: (error as Error).message,
+        type: 'wallet-profile',
+      });
+    }
   }
 
   private async countTransferLogs(
